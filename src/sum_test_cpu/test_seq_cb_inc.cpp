@@ -68,10 +68,24 @@ int main(int argc, char *argv[])
 		result.value += t.value;
 		return 0;
 	};
+        auto L = [] (size_t key, uint64_t id, const tuple_t& t, output_t& res ) {
+            res.key = key;
+            res.id = id;
+            res.value = t.value;
+            return 0;
+        };
+        auto C = [] ( size_t key, uint64_t id, const output_t& a, const output_t &b, output_t &res ) {
+            res.key = key;
+            res.id = id;
+            res.value = a.value + b.value;
+            return 0;
+        };
 	// creation of the Win_Seq pattern
-	Win_Seq seq = WinSeq_Builder(F).withCBWindow(win_len, win_slide)
-								   .withName("test_sum")
-								   .build();	
+        using winseq_t = Win_Seq<decltype( get_tuple_t( L ) ) ,decltype( get_result_t( L ) )>;
+        winseq_t seq = winseq_t( L, C, win_len, win_slide, "test_sum" );
+	//Win_Seq seq = WinSeq_Builder(F).withCBWindow(win_len, win_slide)
+								   //.withName("test_sum")
+								   //.build();	
 	// creation of the pipeline
 	Generator generator(stream_len, num_keys);
 	Consumer consumer(num_keys);

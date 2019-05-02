@@ -41,7 +41,7 @@ WM_TGT			:= $(basename $(WM_SRCS))
 NESTED_SRCS		:= $(wildcard *+*.cpp)
 NESTED_TGT		:= $(basename $(NESTED_SRCS))
 
-all: $(SEQ_TGT) $(WF_TGT) $(KF_TGT) $(PF_TGT) $(WM_TGT) $(NESTED_TGT) test_all_cb test_all_tb
+all: test_seq_cb_inc $(SEQ_TGT) $(WF_TGT) $(KF_TGT) $(PF_TGT) $(WM_TGT) $(NESTED_TGT) test_all_cb test_all_tb
 
 test_all_cb: test_all_cb.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(MACROS) -DALL_TESTS $(OPTFLAGS) -o $(OUT_DIR)/test_all_cb test_all_cb.cpp $(LDFLAGS)
