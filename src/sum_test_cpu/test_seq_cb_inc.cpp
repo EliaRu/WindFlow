@@ -27,6 +27,7 @@
 #include <iostream>
 #include <ff/ff.hpp>
 #include <windflow.hpp>
+#include <builders.hpp>
 #include "sum_cb.hpp"
 
 using namespace ff;
@@ -82,11 +83,12 @@ int main(int argc, char *argv[])
         };
 	// creation of the Win_Seq pattern
         using winseq_t = Win_Seq<decltype( get_tuple_t( L ) ) ,decltype( get_result_t( L ) )>;
-        winseq_t seq = winseq_t( L, C, win_len, win_slide, "test_sum" );
-	//Win_Seq seq = WinSeq_Builder(F).withCBWindow(win_len, win_slide)
-								   //.withName("test_sum")
-								   //.build();	
+	Win_Seq seq = WinSeq_Builder(F).withCBWindow(win_len, win_slide)
+								   .withName("test_sum")
+								   .build();	
+
 	// creation of the pipeline
+        cout << "Incremental Win_Seq without Flat FAT" << endl;
 	Generator generator(stream_len, num_keys);
 	Consumer consumer(num_keys);
 	ff_Pipe<tuple_t, output_t> pipe(generator, seq, consumer);
@@ -97,7 +99,20 @@ int main(int argc, char *argv[])
 	}
 	else {
 		cout << "...end ff_pipe" << endl;
-		return 0;
 	}
-	return 0;
+    
+        cout << "Incremental Win_Seq with Flat FAT" << endl;
+        winseq_t seq1 = winseq_t( L, C, win_len, win_slide, "test_sum" );
+	Generator generator1(stream_len, num_keys);
+	Consumer consumer1(num_keys);
+	ff_Pipe<tuple_t, output_t> pipe1(generator1, seq1, consumer1);
+	cout << "Starting ff_pipe with cardinality " << pipe1.cardinality() << "..." << endl;
+	if (pipe1.run_and_wait_end() < 0) {
+		cerr << "Error execution of ff_pipe" << endl;
+		return -1;
+	}
+	else {
+		cout << "...end ff_pipe" << endl;
+	}
+        return 0;
 }

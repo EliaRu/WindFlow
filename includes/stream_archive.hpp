@@ -52,6 +52,7 @@ private:
     container_t archive; // container implementing the archive (elements are stored in increasing order)
 
 public:
+    StreamArchive( ) { } 
     // constructor
     StreamArchive(f_compare_t _lessThan): lessThan(_lessThan) {}
 
