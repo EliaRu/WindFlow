@@ -65,8 +65,10 @@ public:
     /// function type of the incremental window processing
     using f_winupdate_t = function<int(size_t, uint64_t, const tuple_t &, result_t &)>;
 
+    /// type of the functions that insert an element in the Flat FAT
     using f_winlift_t = 
         function<int(size_t, uint64_t, const tuple_t&, result_t&)>;
+    /// function type of the incremental window processing used in the Flat FAT
     using f_wincombine_t =
         function<int(size_t, uint64_t, const result_t&, const result_t&, result_t&)>;
 private:
@@ -74,7 +76,7 @@ private:
     using const_input_iterator_t = typename deque<tuple_t>::const_iterator;
     // type of the stream archive used by the Win_Seq pattern
     using archive_t = StreamArchive<tuple_t, deque<tuple_t>>;
-    ///
+    /// type of the Flat FAT
     using fat_t = FlatFAT<tuple_t, result_t>;
     // window type used by the Win_Seq pattern
     using win_t = Window<tuple_t, result_t>;
@@ -97,7 +99,7 @@ private:
     struct Key_Descriptor
     {
         archive_t archive; // archive of tuples of this key
-        fat_t fat;
+        fat_t fat; // Flat FAT of this key
         vector<win_t> wins; // open windows of this key
         uint64_t emit_counter; // progressive counter (used if role is PLQ or MAP)
         uint64_t rcv_counter; // number of tuples received of this key
@@ -139,15 +141,15 @@ private:
     };
     f_winfunction_t winFunction; // function of the non-incremental window processing
     f_winupdate_t winUpdate; // function of the incremental window processing
-    f_winlift_t winLift;
-    f_wincombine_t winCombine;
+    f_winlift_t winLift; // function for inserting an element in the Flat FAT
+    f_wincombine_t winCombine; // function of the incremental window processing in the Flat FAT
     f_compare_t compare; // function to compare two tuples
     uint64_t win_len; // window length (no. of tuples or in time units)
     uint64_t slide_len; // slide length (no. of tuples or in time units)
     win_type_t winType; // window type (CB or TB)
     string name; // string of the unique name of the pattern
     bool isNIC; // this flag is true if the pattern is instantiated with a non-incremental query function
-    bool useFlatFAT;
+    bool useFlatFAT; // it is true if the object uses a Flat FAT 
     PatternConfig config; // configuration structure of the Win_Seq pattern
     role_t role; // role of the Win_Seq instance
     unordered_map<size_t, Key_Descriptor> keyMap; // hash table that maps a descriptor for each key
@@ -238,6 +240,7 @@ private:
         }
     }
 
+    //private constructor III (incremental queries, it uses a Flat FAT)
     Win_Seq(f_winlift_t _winLift,
             f_wincombine_t _winCombine,
             uint64_t _win_len,
@@ -315,6 +318,15 @@ public:
             :
             Win_Seq(_winUpdate, _win_len, _slide_len, _winType, _name, PatternConfig(0, 1, _slide_len, 0, 1, _slide_len), SEQ) {}
 
+    /** 
+     *  \brief Constructor III (Incremental Queries and Flat FAT)
+     *  
+     *  \param _winLift the function that inserts a tuple in the FAT
+     *  \param _winCombine the incremental window processing function
+     *  \param _win_len window length (in no. of tuples or in time units)
+     *  \param _slide_len slide length (in no. of tuples or in time units)
+     *  \param _name string with the unique name of the pattern
+     */ 
     Win_Seq(f_winlift_t _winLift,
             f_wincombine_t _winCombine,
             uint64_t _win_len,
@@ -517,7 +529,7 @@ public:
         // extract the key and id/timestamp fields from the input tuple
         tuple_t *t = extractTuple<tuple_t, input_t>(wt);
         size_t key = std::get<0>(t->getInfo()); // key
-        uint64_t id = (winType == CB) ? std::get<1>(t->getInfo()) : std::get<2>(t->getInfo()); // identifier or timestamp
+        uint64_t id =  std::get<1>(t->getInfo()); // identifier or timestamp
         // access the descriptor of the input key
         auto it = keyMap.find(key);
         if (it == keyMap.end()) {
@@ -543,7 +555,7 @@ public:
         }
         else {
             // tuples can be received only ordered by id/timestamp
-            uint64_t last_id = (winType == CB) ? std::get<1>((key_d.last_tuple).getInfo()) : std::get<2>((key_d.last_tuple).getInfo());
+            uint64_t last_id = std::get<1>((key_d.last_tuple).getInfo());
             if (id < last_id) {
                 // the tuple is immediately deleted
                 deleteTuple<tuple_t, input_t>(wt);
@@ -593,20 +605,20 @@ public:
         for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
             // translate the lwid into the corresponding gwid
             uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
-            if (winType == CB)
-                wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
-            else
-                wins.push_back(win_t(key, lwid, gwid, Triggerer_TB(win_len, slide_len, lwid, initial_id), TB, win_len, slide_len));
+            wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
             key_d.next_lwid++;
         }
 
-        // evaluate all the open windows
         bool hasBeenInserted = false;
         size_t cnt_fired = 0;
+        // evaluate all the open windows
         for (auto &win: wins) {
+            uint64_t gwid = win.getGWID( );
             if( win.onTuple(*t) == CONTINUE ) {
+                // the first time a window doesn't fire it inserts the
+                // tuple in the FlatFAT once
                 if( !isEOSMarker<tuple_t, input_t>(*wt) && !hasBeenInserted ) {
-                    if( key_d.fat.insert( 0, 0, *t ) < 0 ) {
+                    if( key_d.fat.insert( key, gwid, *t ) < 0 ) {
                         cerr << RED 
                         << "WindFlow Error: " 
                         << "FlatFAT insert() call error (negative return value)" 
@@ -617,18 +629,15 @@ public:
                 }
             } else {
                 cnt_fired++;
+
                 // send the result of the fired window
                 result_t *out;
-                if( !key_d.fat.isEmpty( ) ) {
-                    out = key_d.fat.getResult( key, win.getGWID( ) );
-                    // purge the tuples from the archive (if the window is not empty)
-                    for( uint64_t i = 0; i < slide_len; i++ ) {
-                        key_d.fat.removeOldestTuple( key, win.getGWID( ) );
-                    }
-                } else {
-                    out = new result_t( );
+                out = key_d.fat.getResult( key, gwid );
+                // purge the tuples from Flat FAT
+                for( uint64_t i = 0; i < slide_len; i++ ) {
+                    key_d.fat.removeOldestTuple( key, gwid );
                 }
-                    out->setInfo( key, win.getGWID( ), 0 );
+
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
                     out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
@@ -660,6 +669,7 @@ public:
 
     // svc method (utilized by the FastFlow runtime)
     result_t *svc(input_t *wt) {
+        // it checks for which implementation the object is using
         if( useFlatFAT ) {
             return flatFATSvc( wt );
         } else {
@@ -715,14 +725,14 @@ public:
             auto &wins = (k.second).wins;
             // iterate over all the existing windows of the key
             for (auto &win: wins) {
-                // non-incremental query
+                size_t k = k.first;
+                uint64_t gwid = win.getGWID( );
+                //send out the result of the window
                 result_t *out;
-                if( !k.second.fat.isEmpty( ) ) {
-                    out = k.second.fat.getResult( 0, 0 );
-                    for( int i = 0; i < slide_len; i++ ) {
-                        k.second.fat.removeOldestTuple( 0, 0 );
-                    }
-                    out->setInfo( k.first, win.getGWID( ), 0 );
+                out = k.second.fat.getResult( k, gwid );
+                // purge the tuples from Flat FAT
+                for( int i = 0; i < slide_len; i++ ) {
+                    k.second.fat.removeOldestTuple( k, gwid );
                 }
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
@@ -742,6 +752,7 @@ public:
     // method to manage the EOS (utilized by the FastFlow runtime)
     void eosnotify(ssize_t id)
     {
+        // it checks for which implementation the object is using
         if( useFlatFAT ) {
             flatFATEosNotify( id );
         } else {
