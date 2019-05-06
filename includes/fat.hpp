@@ -116,48 +116,19 @@ public:
             return -1;
         }
         size_t nextNode = parent( back );
-        size_t f = front;
-        size_t b = back;
         while( nextNode != 0 ) {
             size_t lc = left_child( nextNode );
             size_t rc= right_child( nextNode );
-            if( f <= b ) {
-                if( lc < f || lc > b) {
-                    tree[nextNode] = tree[rc];
-                } else if( rc < f|| rc > b ) {
-                    tree[nextNode] = tree[lc];
-                } else {
-                    int res = winCombine(
-                        key, 
-                        id, 
-                        tree[lc],
-                        tree[rc], 
-                        tree[nextNode] 
-                    );
-                    if( res < 0 ) {
-                        return -1;
-                    }
-                }
-            } else {
-                if( lc > b && lc < f ) {
-                    tree[nextNode] = tree[rc];
-            } else if( rc > b && rc < f ) {
-                    tree[nextNode] = tree[lc];
-                } else {
-                    int res = winCombine(
-                        key, 
-                        id, 
-                        tree[lc],
-                        tree[rc], 
-                        tree[nextNode] 
-                    );
-                    if( res < 0 ) {
-                        return -1;
-                    }
-                }
+            int res = winCombine(
+                key, 
+                id, 
+                tree[lc],
+                tree[rc], 
+                tree[nextNode] 
+            );
+            if( res < 0 ) {
+                return -1;
             }
-            f = parent( f );
-            b = parent( b );
             nextNode = parent( nextNode );
         }
         return 0;
@@ -168,7 +139,27 @@ public:
     }
 
     int removeOldestTuple( size_t key, uint64_t id ) {
-       if( front == back ) {
+        tuple_t t = tuple_t( );
+        if( winLift( key, id, t, tree[front] ) < 0 ) {
+            return -1;
+        }
+        size_t nextNode = parent( front );
+        while( nextNode != 0 ) {
+            size_t lc = left_child( nextNode );
+            size_t rc= right_child( nextNode );
+            int res = winCombine(
+                key, 
+                id, 
+                tree[lc],
+                tree[rc], 
+                tree[nextNode] 
+            );
+            if( res < 0 ) {
+                return -1;
+            }
+            nextNode = parent( nextNode );
+        }
+        if( front == back ) {
             front = back = n - 1;
             is_empty = true;
         } else if( front == 2 * n -1 ) {
@@ -176,58 +167,10 @@ public:
         } else {
             front++;
         }
-        size_t nextNode = parent( front );
-        size_t f = front;
-        size_t b = back;
-        while( nextNode != 0 ) {
-            size_t lc = left_child( nextNode );
-            size_t rc= right_child( nextNode );
-            if( f <= b ) {
-                if( lc < f || lc > b) {
-                    tree[nextNode] = tree[rc];
-                } else if( rc < f|| rc > b ) {
-                    tree[nextNode] = tree[lc];
-                } else {
-                    int res = winCombine(
-                        key, 
-                        id, 
-                        tree[lc],
-                        tree[rc], 
-                        tree[nextNode] 
-                    );
-                    if( res < 0 ) {
-                        return -1;
-                    }
-                }
-            } else {
-                if( lc > b && lc < f ) {
-                    tree[nextNode] = tree[rc];
-                } else if( rc > b && rc < f ) {
-                    tree[nextNode] = tree[lc];
-                } else {
-                    int res = winCombine(
-                        key, 
-                        id, 
-                        tree[lc],
-                        tree[rc], 
-                        tree[nextNode] 
-                    );
-                    if( res < 0 ) {
-                        return -1;
-                    }
-                }
-            }
-            f = parent( f );
-            b = parent( b );
-            nextNode = parent( nextNode );
-        }
         return 0;
     }
 
     result_t *getResult( size_t key, uint64_t id ) {
-        if( is_empty ) {
-            return nullptr;
-        }
         result_t* res = new result_t( );
         if( front <= back ) {
             *res = tree[root];
@@ -240,16 +183,6 @@ public:
         return res;
     }
        
-    /*... update( ... ) {
-        if( archive.size( ) < win_size - 1 ) {
-            archive.push_back( t );
-        } else if( archive.size( ) == win_size - 1 ) {
-            build_tree( ... );
-        } else {
-            update_tree( ... );
-        }
-    }
-    */
 };
 
 #endif
