@@ -637,8 +637,8 @@ public:
                 for( uint64_t i = 0; i < slide_len; i++ ) {
                     key_d.fat.removeOldestTuple( key, gwid );
                 }
-
-                // special cases: role is PLQ or MAP
+                out->setInfo( key, gwid, 0);
+                // special cases: role is PLQ or MAP    
                 if (role == MAP) {
                     out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
                     key_d.emit_counter += map_indexes.second;
@@ -725,15 +725,16 @@ public:
             auto &wins = (k.second).wins;
             // iterate over all the existing windows of the key
             for (auto &win: wins) {
-                size_t k = k.first;
+                size_t key = k.first;
                 uint64_t gwid = win.getGWID( );
                 //send out the result of the window
                 result_t *out;
-                out = k.second.fat.getResult( k, gwid );
+                out = k.second.fat.getResult( key, gwid );
                 // purge the tuples from Flat FAT
                 for( int i = 0; i < slide_len; i++ ) {
-                    k.second.fat.removeOldestTuple( k, gwid );
+                    k.second.fat.removeOldestTuple( key, gwid );
                 }
+                out->setInfo( key, gwid, 0 );
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
                     out->setInfo(k.first, (k.second).emit_counter, std::get<2>(out->getInfo()));
