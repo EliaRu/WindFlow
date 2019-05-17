@@ -37,6 +37,8 @@
 #include <functional>
 #include <assert.h>
 #include <cmath>
+#include <list>
+#include <vector>
 
 using namespace std;
 
@@ -169,6 +171,66 @@ public:
         return update( key, id, back );
     }
 
+    int insert( size_t key, uint64_t id, vector<tuple_t> const& inputs ) 
+    {
+        list<size_t> nodesToUpdate;
+        for( size_t i = 0; i < inputs.size( ); i++ ) {
+            //Checks if the tree is empty
+            if( front == back && front == n - 1 ) {
+                front++, back++;
+                is_empty = false;
+            //Check if front is the last leaf so it must wrap around
+            } else if( back == 2 * n - 1 ) {
+                //But it needs to check if the first leaf is empty
+                if( front != n ) {
+                    back = n;
+                } else {
+                    return -1;
+                }
+            //Check if front < back and the tree is full
+            } else if( front != back + 1 ) {
+                back++;
+            } else {
+                return -1;
+            }
+            //Insert the element in the next empty position
+            if( winLift( key, id, inputs[i], tree[back] ) < 0 ) {
+                return -1;
+            }
+            size_t p = parent( back );
+            if( back != root &&
+                ( nodesToUpdate.empty( ) || 
+                nodesToUpdate.back( ) != p ) ) 
+            {
+                nodesToUpdate.push_back( p );
+            }
+        }
+        while( !nodesToUpdate.empty( ) ) {
+            size_t nextNode = nodesToUpdate.front( );
+            nodesToUpdate.pop_front( );
+            size_t lc = left_child( nextNode );
+            size_t rc= right_child( nextNode );
+            int res = winCombine(
+                key, 
+                id, 
+                tree[lc],
+                tree[rc], 
+                tree[nextNode] 
+            );
+            if( res < 0 ) {
+                return -1;
+            }
+            size_t p = parent( nextNode );
+            if( nextNode != root &&
+                ( nodesToUpdate.empty( ) || 
+                nodesToUpdate.back( ) != p ) ) 
+            {
+                nodesToUpdate.push_back( p );
+            }
+        }
+        return 0;
+    }
+
     bool isEmpty( ) {
         return is_empty;
     }
@@ -193,6 +255,56 @@ public:
             front = n;
         } else {
             front++;
+        }
+        return 0;
+    }
+
+    int remove( size_t key, uint64_t id, size_t count ) {
+        tuple_t t = tuple_t( );
+        list<size_t> nodesToUpdate;
+        for( size_t i = 0; i < count; i++ ) {
+            if( winLift( key, id, t, tree[front] ) < 0 ) {
+                return -1;
+            }
+            size_t p = parent( front );
+            if( front != root &&
+                ( nodesToUpdate.empty( ) || 
+                nodesToUpdate.back( ) != p ) ) 
+            {
+                nodesToUpdate.push_back( p );
+            }
+            if( front == back ) {
+                front = back = n - 1;
+                is_empty = true;
+                break;
+            } else if( front == 2 * n -1 ) {
+                front = n;
+            } else {
+                front++;
+            }
+        }
+        while( !nodesToUpdate.empty( ) ) {
+            size_t nextNode = nodesToUpdate.front( );
+            nodesToUpdate.pop_front( );
+            size_t lc = left_child( nextNode );
+            size_t rc= right_child( nextNode );
+            int res = winCombine(
+                key, 
+                id, 
+                tree[lc],
+                tree[rc], 
+                tree[nextNode] 
+            );
+            if( res < 0 ) {
+                return -1;
+            }
+            size_t p = parent( nextNode );
+            if( nextNode != root &&
+                ( nodesToUpdate.empty( ) || 
+                nodesToUpdate.back( ) != p ) ) 
+            {
+                nodesToUpdate.push_back( p );
+            }
         }
         return 0;
     }

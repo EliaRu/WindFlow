@@ -426,6 +426,7 @@ public:
         }
         else
             add(_map);
+        return *this;
     }
 
 	/** 
@@ -1000,6 +1001,7 @@ public:
     		cout << BOLDGREEN << "WindFlow Status Message: MultiPipe [" << name << "] terminated successfully" << DEFAULT << endl;
     	else if(!this->isUnified)
     		cerr << RED << "WindFlow Error: MultiPipe [" << name << "] terminated with error" << DEFAULT << endl;
+        return status;
     }
 
 	/** 

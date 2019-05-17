@@ -37,6 +37,7 @@
 
 // includes
 #include <vector>
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <math.h>
@@ -45,6 +46,7 @@
 #include <builders.hpp>
 #include <stream_archive.hpp>
 #include <fat.hpp>
+#include <cassert>
 
 using namespace ff;
 
@@ -100,7 +102,8 @@ private:
     {
         archive_t archive; // archive of tuples of this key
         fat_t fat; // Flat FAT of this key
-        vector<win_t> wins; // open windows of this key
+        vector<tuple_t> received_tuples;
+        list<win_t> wins; // open windows of this key
         uint64_t emit_counter; // progressive counter (used if role is PLQ or MAP)
         uint64_t rcv_counter; // number of tuples received of this key
         tuple_t last_tuple; // copy of the last tuple received of this key
@@ -113,7 +116,6 @@ private:
                        rcv_counter(0),
                        next_lwid(0)
         {
-            wins.reserve(DEFAULT_VECTOR_CAPACITY);
         }
 
         Key_Descriptor(
@@ -127,13 +129,13 @@ private:
             rcv_counter(0),
             next_lwid(0)
         {
-            wins.reserve(DEFAULT_VECTOR_CAPACITY);
         }
 
         // move constructor
         Key_Descriptor(Key_Descriptor &&_k):
                        archive(move(_k.archive)),
                        fat(move(_k.fat)),
+                       received_tuples( move( _k.received_tuples ) ),
                        wins(move(_k.wins)),
                        emit_counter(_k.emit_counter),
                        rcv_counter(_k.rcv_counter),
@@ -497,7 +499,11 @@ public:
             }
         }
         // purge the fired windows
-        wins.erase(wins.begin(), wins.begin() + cnt_fired);
+        size_t i = 0;
+        auto jt = wins.begin( );
+        for( ; i < cnt_fired; i++, jt++ ) {
+        }
+        wins.erase(wins.begin(), jt );
         // delete the received tuple
         deleteTuple<tuple_t, input_t>(wt);
 #if defined(LOG_DIR)
@@ -609,50 +615,49 @@ public:
             key_d.next_lwid++;
         }
 
-        bool hasBeenInserted = false;
         size_t cnt_fired = 0;
         // evaluate all the open windows
-        for (auto &win: wins) {
-            uint64_t gwid = win.getGWID( );
-            if( win.onTuple(*t) == CONTINUE ) {
-                // the first time a window doesn't fire it inserts the
-                // tuple in the FlatFAT once
-                if( !isEOSMarker<tuple_t, input_t>(*wt) && !hasBeenInserted ) {
-                    if( key_d.fat.insert( key, gwid, *t ) < 0 ) {
-                        cerr << RED 
-                        << "WindFlow Error: " 
-                        << "FlatFAT insert() call error (negative return value)" 
-                        << DEFAULT << endl;
-                        exit(EXIT_FAILURE);
-                    }
-                    hasBeenInserted = true;
-                }
-            } else {
-                cnt_fired++;
-
-                // send the result of the fired window
-                result_t *out;
-                out = key_d.fat.getResult( key, gwid );
-                // purge the tuples from Flat FAT
-                for( uint64_t i = 0; i < slide_len; i++ ) {
-                    key_d.fat.removeOldestTuple( key, gwid );
-                }
-                out->setInfo( key, gwid, 0);
-                // special cases: role is PLQ or MAP    
-                if (role == MAP) {
-                    out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
-                    key_d.emit_counter += map_indexes.second;
-                }
-                else if (role == PLQ) {
-                    uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                    out->setInfo(key, new_id, std::get<2>(out->getInfo()));
-                    key_d.emit_counter++;
-                }
-                this->ff_send_out(out);
+        assert( wins.size( ) > 0 );
+        auto& win = wins.front( );
+        uint64_t gwid = win.getGWID( );
+        if( win.onTuple(*t) == FIRED ) {
+            cnt_fired++;
+            if( key_d.fat.insert( key, gwid, key_d.received_tuples ) < 0 ) {
+                cout << RED << "Errore nella fat.insert "
+                << DEFAULT << endl;
+                exit(EXIT_FAILURE);
             }
+            key_d.received_tuples.clear( );
+            // send the result of the fired window
+            result_t *out;
+            out = key_d.fat.getResult( key, gwid );
+            // purge the tuples from Flat FAT
+            key_d.fat.remove( key, gwid, slide_len );
+            out->setInfo( key, gwid, 0);
+            // special cases: role is PLQ or MAP    
+            if (role == MAP) {
+                out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
+                key_d.emit_counter += map_indexes.second;
+            }
+            else if (role == PLQ) {
+                uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
+                out->setInfo(key, new_id, std::get<2>(out->getInfo()));
+                key_d.emit_counter++;
+            }
+            this->ff_send_out(out);
         }
+        // the first time a window doesn't fire it inserts the
+        // tuple in the FlatFAT once
+        if( !isEOSMarker<tuple_t, input_t>(*wt) ) {
+            key_d.received_tuples.push_back( *t );
+        }
+
         // purge the fired windows
-        wins.erase(wins.begin(), wins.begin() + cnt_fired);
+        size_t i = 0;
+        auto jt = wins.begin( );
+        for( ; i < cnt_fired; i++, jt++ ) {
+        }
+        wins.erase(wins.begin(), jt );
         // delete the received tuple
         deleteTuple<tuple_t, input_t>(wt);
 #if defined(LOG_DIR)
@@ -724,6 +729,12 @@ public:
         for (auto &k: keyMap) {
             auto &wins = (k.second).wins;
             // iterate over all the existing windows of the key
+            size_t i = 0;
+            k.second.fat.insert( 
+                k.first, 
+                wins.front( ).getGWID( ), 
+                k.second.received_tuples 
+            );
             for (auto &win: wins) {
                 size_t key = k.first;
                 uint64_t gwid = win.getGWID( );
@@ -731,9 +742,7 @@ public:
                 result_t *out;
                 out = k.second.fat.getResult( key, gwid );
                 // purge the tuples from Flat FAT
-                for( int i = 0; i < slide_len; i++ ) {
-                    k.second.fat.removeOldestTuple( key, gwid );
-                }
+                k.second.fat.remove( key, gwid, slide_len );
                 out->setInfo( key, gwid, 0 );
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
