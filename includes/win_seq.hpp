@@ -121,10 +121,11 @@ private:
         Key_Descriptor(
             f_winlift_t _winLift,
             f_wincombine_t _winCombine,
+            bool _isCommutative,
             size_t _win_len,
             uint64_t _emit_counter = 0 
         ) : 
-            fat( _winLift, _winCombine, _win_len ),
+            fat( _winLift, _winCombine, _win_len, _isCommutative ),
             emit_counter(_emit_counter),
             rcv_counter(0),
             next_lwid(0)
@@ -143,9 +144,10 @@ private:
     };
     f_winfunction_t winFunction; // function of the non-incremental window processing
     f_winupdate_t winUpdate; // function of the incremental window processing
+    f_compare_t compare; // function to compare two tuples
     f_winlift_t winLift; // function for inserting an element in the Flat FAT
     f_wincombine_t winCombine; // function of the incremental window processing in the Flat FAT
-    f_compare_t compare; // function to compare two tuples
+    bool isWinCombineCommutative;
     uint64_t win_len; // window length (no. of tuples or in time units)
     uint64_t slide_len; // slide length (no. of tuples or in time units)
     win_type_t winType; // window type (CB or TB)
@@ -245,6 +247,7 @@ private:
     //private constructor III (incremental queries, it uses a Flat FAT)
     Win_Seq(f_winlift_t _winLift,
             f_wincombine_t _winCombine,
+            bool _isWinCombineCommutative,
             uint64_t _win_len,
             uint64_t _slide_len,
             string _name,
@@ -253,6 +256,7 @@ private:
             :
             winLift( _winLift ),
             winCombine( _winCombine ),
+            isWinCombineCommutative( _isWinCombineCommutative ),
             win_len(_win_len),
             slide_len(_slide_len),
             winType( CB ),
@@ -331,11 +335,12 @@ public:
      */ 
     Win_Seq(f_winlift_t _winLift,
             f_wincombine_t _winCombine,
+            bool _isWinCombineCommutative,
             uint64_t _win_len,
             uint64_t _slide_len,
             string _name)
             :
-            Win_Seq(_winLift, _winCombine, _win_len, _slide_len, _name, PatternConfig(0, 1, _slide_len, 0, 1, _slide_len), SEQ) {}
+            Win_Seq(_winLift, _winCombine, _isWinCombineCommutative, _win_len, _slide_len, _name, PatternConfig(0, 1, _slide_len, 0, 1, _slide_len), SEQ) {}
 //@cond DOXY_IGNORE
 
     // svc_init method (utilized by the FastFlow runtime)
@@ -546,6 +551,7 @@ public:
                     Key_Descriptor( 
                         winLift,
                         winCombine, 
+                        isWinCombineCommutative,
                         win_len,
                         role == MAP ? map_indexes.first : 0
                     )

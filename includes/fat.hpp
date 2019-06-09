@@ -55,6 +55,7 @@ private:
 
     f_winlift_t winLift;
     f_wincombine_t winCombine;
+    bool isCommutative;
 
     vector<result_t> tree;
     size_t n;
@@ -132,9 +133,15 @@ private:
 public:
     FlatFAT( ) : n( 0 ) { }
 
-    FlatFAT( f_winlift_t _winLift, f_wincombine_t _winCombine, size_t _n ):
+    FlatFAT( 
+        f_winlift_t _winLift, 
+        f_wincombine_t _winCombine, 
+        size_t _n,
+        bool _isCommutative 
+    ) :
         root( 1 ), is_empty( true ), 
-        winLift( _winLift ), winCombine( _winCombine )
+        winLift( _winLift ), winCombine( _winCombine ), 
+        isCommutative( _isCommutative )
     { 
         //The tree must be a complete binary tree so n must be rounded
         //to the next power of two
@@ -311,7 +318,7 @@ public:
 
     result_t *getResult( size_t key, uint64_t id ) const {
         result_t* res = new result_t( );
-        if( front <= back ) {
+        if( isCommutative || front <= back ) {
             //The elements are in the correct order so the result
             //in the root is valid
             *res = tree[root];

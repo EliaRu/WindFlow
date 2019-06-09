@@ -214,6 +214,7 @@ public:
 
     Key_Farm(f_winlift_t _winLift,
              f_wincombine_t _winCombine, 
+             bool _isCommutative,
              uint64_t _win_len,
              uint64_t _slide_len,
              size_t _pardegree,
@@ -240,7 +241,14 @@ public:
         vector<ff_node *> w(_pardegree);
         // create the Win_Seq instances
         for (size_t i = 0; i < _pardegree; i++) {
-            auto *seq = new win_seq_t(_winLift, _winCombine, _win_len, _slide_len, _name + "_kf");
+            auto *seq = new win_seq_t(
+                _winLift, 
+                _winCombine, 
+                _isCommutative, 
+                _win_len, 
+                _slide_len, 
+                _name + "_kf"
+            );
             w[i] = seq;
         }
         ff_farm::add_workers(w);

@@ -268,6 +268,7 @@ private:
     //private constructor IV (incremental queries with FAT )
     Win_Farm( f_winlift_t _winLift,
               f_wincombine_t _winCombine,
+              bool _isCommutative,
               uint64_t _win_len,
               uint64_t _slide_len,
               size_t _emitter_degree,
@@ -317,8 +318,8 @@ private:
                 // configuration structure of the Win_Seq instances
                 PatternConfig configSeq(_config.id_inner, _config.n_inner, _config.slide_inner, i, _pardegree, _slide_len);
                 auto *seq = new win_seq_t(
-                    _winLift, _winCombine, _win_len, private_slide, 
-                    _name + "_wf", configSeq, _role
+                    _winLift, _winCombine, _isCommutative, _win_len,
+                    private_slide, _name + "_wf", configSeq, _role
                 );
                 w.push_back(seq);
             }
@@ -340,8 +341,8 @@ private:
                 // configuration structure of the Win_Seq instances
                 PatternConfig configSeq(_config.id_inner, _config.n_inner, _config.slide_inner, i, _pardegree, _slide_len);
                 auto *seq = new win_seq_t(
-                    _winLift, _winCombine, _win_len, private_slide, 
-                    _name + "_wf", configSeq, _role
+                    _winLift, _winCombine, _isCommutative, _win_len, 
+                    private_slide, _name + "_wf", configSeq, _role
                 );
                 auto *comb = new ff_comb(ord, seq, true, true);
                 seqs[i] = comb;
@@ -427,6 +428,7 @@ public:
 
     Win_Farm( f_winlift_t _winLift,
               f_wincombine_t _winCombine,
+              bool _isCommutative,
               uint64_t _win_len,
               uint64_t _slide_len,
               size_t _emitter_degree,
@@ -435,8 +437,8 @@ public:
               bool _ordered=true,
               opt_level_t _opt_level=LEVEL0
     ) : Win_Farm( 
-            _winLift, _winCombine, _win_len, _slide_len, _emitter_degree, 
-            _pardegree, _name, _ordered, _opt_level, 
+            _winLift, _winCombine, _isCommutative,_win_len, _slide_len, 
+            _emitter_degree, _pardegree, _name, _ordered, _opt_level, 
             PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ 
         )
     { }

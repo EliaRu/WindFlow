@@ -102,7 +102,9 @@ int main(int argc, char *argv[])
 	}
     
         cout << "Incremental Win_Seq with Flat FAT" << endl;
-        winseq_t seq1 = winseq_t( L, C, win_len, win_slide, "test_sum" );
+        winseq_t seq1 = winseq_t( 
+            L, C, true, win_len, win_slide, "test_sum" 
+        );
 	Generator generator1(stream_len, num_keys);
 	Consumer consumer1(num_keys);
 	ff_Pipe<tuple_t, output_t> pipe1(generator1, seq1, consumer1);
