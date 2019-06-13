@@ -16,15 +16,15 @@
 # Author: Gabriele Mencagli <mencagli@di.unipi.it>
 # Date:   June 2017
 
-FF_ROOT			= $(HOME)/fastflow
+FF_ROOT			= ../../../fastflow
 OUT_DIR			= ../../bin/sum_test_gpu
 INCLUDE_DIR		= ../../includes
 
 INCLUDES		= -I $(FF_ROOT) -I $(INCLUDE_DIR) -I .
 NCXX			= nvcc
-NCXXFLAGS		= -g -x cu -w -std=c++14 --expt-extended-lambda -gencode arch=compute_35,code=sm_35
+NCXXFLAGS		= -g -G -x cu -w -std=c++14 --expt-extended-lambda -gencode arch=compute_35,code=sm_35
 MACROS 			= # -DTRACE_FASTFLOW -DLOG_DIR="/home/mencagli/WindFlow/log"
-NOPTFLAGS		= -O3
+NOPTFLAGS		=
 NLDFLAGS      	= 
 OPT_LEVEL		= -DLEVEL=LEVEL0
 
@@ -41,7 +41,7 @@ WM_TGT			:= $(basename $(WM_SRCS))
 NESTED_SRCS		:= $(wildcard *+*.cpp)
 NESTED_TGT		:= $(basename $(NESTED_SRCS))
 
-all: $(SEQ_TGT) $(WF_TGT) $(KF_TGT) $(PF_TGT) $(WM_TGT) $(NESTED_TGT) test_all_cb test_all_tb
+all: test_seq_gpu_cb $(SEQ_TGT) $(WF_TGT) $(KF_TGT) $(PF_TGT) $(WM_TGT) $(NESTED_TGT) test_all_cb test_all_tb
 
 test_all_cb: test_all_cb.cpp
 	$(NCXX) $(NCXXFLAGS) $(NOPTFLAGS) $(INCLUDES) $(MACROS) -DALL_TESTS -o $(OUT_DIR)/test_all_cb test_all_cb.cpp $(NLDFLAGS)

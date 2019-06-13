@@ -45,7 +45,7 @@ sum_test_cpu:
 	$(MAKE) -e -C sum_test_cpu
 
 sum_test_gpu:
-	$(MAKE) -e -C sum_test_gpu
+	$(MAKE) -C sum_test_gpu
 
 sink_test:
 	$(MAKE) -e -C sink_test

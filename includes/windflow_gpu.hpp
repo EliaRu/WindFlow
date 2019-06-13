@@ -31,6 +31,7 @@
 #define WINDFLOW_GPU_H
 
 // includes
+#include <utils_gpu.hpp>
 #include <win_seq_gpu.hpp>
 #include <win_farm_gpu.hpp>
 #include <key_farm_gpu.hpp>

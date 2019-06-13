@@ -30,6 +30,8 @@
 #include <windflow_gpu.hpp>
 #include <sum_cb.hpp>
 
+#include <win_fat_gpu.hpp>
+
 // main
 int main(int argc, char *argv[])
 {
@@ -89,7 +91,49 @@ int main(int argc, char *argv[])
 	}
 	else {
 		cout << "...end ff_pipe" << endl;
-		return 0;
+	}
+
+        cudaDeviceReset( );
+
+        auto G = [] __host__ __device__ ( 
+            size_t key, 
+            uint64_t wid, 
+            const tuple_t &a, 
+            const tuple_t &b, 
+            tuple_t &c ) 
+        {
+            c.key = key;
+            c.id = wid;
+            c.value = a.value + b.value;
+            return 0;
+        };
+
+        auto L = [] ( 
+            size_t key, 
+            uint64_t wid, 
+            const tuple_t &a, 
+            tuple_t &b ) 
+        {
+            b.key = key;
+            b.id = wid;
+            b.value = a.value;
+            return 0;
+        };
+
+        Win_FAT_GPU< tuple_t, tuple_t, decltype( G ), tuple_t > win_fat(
+            G, L, win_len, win_slide, batch_len, "test_sum_fat"
+        );
+            
+	Generator generator2(stream_len, num_keys);
+	Consumer consumer2(num_keys);
+	ff_Pipe<tuple_t, output_t> pipe2(generator2, win_fat, consumer2 );
+	cout << "Starting ff_pipe with cardinality " << pipe2.cardinality() << "..." << endl;
+	if (pipe2.run_and_wait_end() < 0) {
+		cerr << "Error execution of ff_pipe" << endl;
+		return -1;
+	}
+	else {
+		cout << "...end ff_pipe" << endl;
 	}
 	return 0;
 }

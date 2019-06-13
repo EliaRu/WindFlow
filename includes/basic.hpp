@@ -99,7 +99,6 @@ enum opt_level_t { LEVEL0, LEVEL1, LEVEL2 };
 // macros used by the GPU patterns
 #define DEFAULT_BATCH_SIZE_TB 100 //< inital batch size (in no. of tuples) used by GPU patterns with time-based windows
 #define DEFAULT_CUDA_NUM_THREAD_BLOCK 256 //< default number of threads per block
-#define gpuErrChk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
 // macros for the linux terminal colors
 #define DEFAULT 	"\033[0m"
@@ -194,6 +193,9 @@ class Win_MapReduce;
 // forward declaration of the Win_Seq_GPU pattern
 template<typename tuple_t, typename result_t, typename fun_t, typename input_t=tuple_t>
 class Win_Seq_GPU;
+
+template<typename tuple_t, typename result_t, typename fun_t, typename input_t=tuple_t>
+class Win_FAT_GPU;
 
 // forward declaration of the Win_Farm_GPU pattern
 template<typename tuple_t, typename result_t, typename fun_, typename input_t=tuple_t>
