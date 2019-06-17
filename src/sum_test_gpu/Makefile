@@ -22,11 +22,11 @@ INCLUDE_DIR		= ../../includes
 
 INCLUDES		= -I $(FF_ROOT) -I $(INCLUDE_DIR) -I .
 NCXX			= nvcc
-NCXXFLAGS		= -g -G -x cu -w -std=c++14 --expt-extended-lambda -gencode arch=compute_35,code=sm_35
+NCXXFLAGS		= -x cu -w -std=c++14 --expt-extended-lambda -gencode arch=compute_35,code=sm_35
 MACROS 			= # -DTRACE_FASTFLOW -DLOG_DIR="/home/mencagli/WindFlow/log"
-NOPTFLAGS		=
+NOPTFLAGS		= -Xptxas -O3,-v
 NLDFLAGS      	= 
-OPT_LEVEL		= -DLEVEL=LEVEL0
+OPT_LEVEL		= -DLEVEL=LEVEL0 -O3
 
 SEQ_SRCS		:= $(wildcard *seq*.cpp)
 SEQ_TGT			:= $(basename $(SEQ_SRCS))

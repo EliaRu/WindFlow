@@ -2,10 +2,12 @@
 #define BATCHED_FAT_H
 
 #include <vector>
+#include <list>
+#include <iostream>
 #include <cmath>
 #include <cassert>
 
-#include <basic.hpp>
+#include <utils_gpu.hpp>
 
 using namespace std;
 
@@ -23,7 +25,24 @@ __global__ void Init(
     combine( key, gwid, levelA[i * 2], levelA[ i * 2 + 1 ], levelB[i] );
 }
 
-__device__ int Parent( int pos, int B )
+template< typename T, typename F>
+__global__ void Update(
+    F combine,
+    size_t key,
+    uint64_t gwid,
+    T* levelA,
+    T* levelB,
+    size_t offset,
+    size_t levelBSize,
+    int numThreads )
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if ( i >= numThreads ) return;
+    i = ( i + offset ) % levelBSize;
+    combine( key, gwid, levelA[i * 2], levelA[ i * 2 + 1 ], levelB[i] );
+}
+
+__host__ __device__ int Parent( int pos, int B )
 {
     return ( pos >> 1 ) | B;
 }
@@ -35,6 +54,8 @@ __global__ void ComputeResults(
     uint64_t gwid,
     T* fat, 
     T* results, 
+    size_t offset,
+    int numLeaves,
     int B,
     int W, 
     int b_id, 
@@ -44,16 +65,12 @@ __global__ void ComputeResults(
     int win_local_id = blockIdx.x * blockDim.x + threadIdx.x;
     if( win_local_id >= Nb ) return;
     int win_global_id = win_local_id  + b_id * Nb;
-    int wS = win_local_id * S;
+    int wS = ( offset + win_local_id * S ) % B;
 
     while( W > 0 ) {
         int range;
-        wS = wS % B;
-        if( wS == 0 ) {
-            range = B;
-        } else {
-            range = ( wS & -wS );
-        }
+        wS = wS >= B ? 0 : wS;
+        range = wS == 0 ? B : ( wS & -wS );
         int64_t pow = W;
         pow |= pow >> 1;
         pow |= pow >> 2;
@@ -66,7 +83,7 @@ __global__ void ComputeResults(
         int tr = range;
         int tn = wS;
         while( tr > 1 ) {
-            tn = Parent( tn, B );
+            tn = Parent( tn, numLeaves );
             tr >>= 1;
         }
         combine( 
@@ -76,7 +93,9 @@ __global__ void ComputeResults(
             fat[tn], 
             results[win_local_id] 
         );
+        int oldWS = wS;
         wS += range;
+        range = wS >= B ? B - oldWS : range;
         W -= range;
     }
 }
@@ -94,6 +113,7 @@ private:
  */
     T* d_tree;
     T* d_results;
+    T* tuples;
     vector<T> results;
     vector<T> initResults;
     size_t treeSize;
@@ -105,6 +125,7 @@ private:
     size_t windowSize;
     size_t slide;
     size_t Nb;
+    size_t offset;
     F combine;
 
 public:
@@ -122,6 +143,7 @@ public:
         Nb( _numWindows ),
         windowSize( _windowSize ),
         slide( _slide ),
+        offset( 0 ),
         combine( _combine )
     { 
         size_t noBits = ( size_t ) ceil( log2( batchSize ) );
@@ -138,6 +160,7 @@ public:
         results.resize( Nb );
         initResults.resize( Nb );
         gpuErrChk( cudaMalloc( ( void ** )&d_results, Nb * sizeof( T ) ) );
+        tuples = new T[batchSize];
     }
 
     bool build( 
@@ -190,8 +213,6 @@ public:
         //TODO:it needs to stop when it reaches level i s.t. 2^i > W
         //it may also reduce memory occupation
 
-        
-
         gpuErrChk( 
             cudaMemcpy( 
                 ( void * ) d_results,
@@ -208,7 +229,9 @@ public:
                 gwid,
                 d_tree, 
                 d_results, 
+                offset,
                 noLeaves, 
+                batchSize,
                 windowSize, 
                 b_id, 
                 Nb, 
@@ -227,7 +250,134 @@ public:
                 gwid,
                 d_tree, 
                 d_results, 
+                offset,
                 noLeaves, 
+                batchSize,
+                windowSize, 
+                b_id, 
+                Nb, 
+                slide 
+            );
+            cudaError_t err;
+            if( err = cudaGetLastError( ) ) {
+                printf( 
+                    "Esecuzione Kernel ComputeResults.\nErrore: %d\n", err 
+                );
+            }
+        }
+        return true;
+    }
+
+    bool update(
+        const vector<T>& tuples, 
+        size_t key, 
+        uint64_t gwid, 
+        int b_id )
+    {
+        size_t spaceLeft = batchSize - offset;
+        if( tuples.size( ) <= spaceLeft ) {
+            //inserisco tutte insieme alla fine
+            gpuErrChk( 
+                cudaMemcpy( 
+                    d_tree + offset,
+                    tuples.data( ),
+                    tuples.size( ) * sizeof( T ),
+                    cudaMemcpyHostToDevice
+                )
+            );
+        } else {
+            //spezzo in due parti
+            gpuErrChk( 
+                cudaMemcpy( 
+                    d_tree + offset,
+                    tuples.data( ),
+                    spaceLeft * sizeof( T ),
+                    cudaMemcpyHostToDevice
+                )
+            );
+            gpuErrChk( 
+                cudaMemcpy( 
+                    d_tree,
+                    tuples.data( ) + spaceLeft,
+                    ( tuples.size( ) - spaceLeft ) * sizeof( T ),
+                    cudaMemcpyHostToDevice
+                )
+            );
+        }
+
+        int pow = 1;
+        T* d_levelA = d_tree;
+        T* d_levelB = d_levelA + noLeaves / pow;
+        size_t sizeB = ceil( (double ) batchSize / ( pow << 1 ) );
+        size_t update_pos = Parent( offset, noLeaves );
+        size_t numSeenElements = noLeaves;
+        size_t distance = update_pos - numSeenElements;
+        int numThreads = ceil( ( double ) tuples.size( ) / ( pow << 1 ) ) + 1;
+
+        while( d_levelB < d_tree + treeSize ) {
+            //update kernel
+            size_t numBlocks = ceil( numThreads / 1024.0 );
+            Update<T, F><<<numBlocks, 1024>>>( 
+                combine, 
+                key, 
+                gwid, 
+                d_levelA, 
+                d_levelB, 
+                distance, 
+                sizeB, 
+                numThreads
+            );
+            pow = pow << 1;
+            d_levelA = d_levelB;
+            d_levelB = d_levelA + noLeaves / pow;
+            sizeB = ceil( ( double ) batchSize / ( pow << 1 ) );
+            update_pos = Parent( update_pos, noLeaves );
+            numSeenElements += noLeaves / pow;
+            distance = update_pos - numSeenElements;
+            numThreads = ceil( ( double )  tuples.size( ) / ( pow << 1 ) ) + 1;
+        }
+        offset = ( offset + tuples.size( ) ) % batchSize;
+        
+        gpuErrChk( 
+            cudaMemcpy( 
+                ( void * ) d_results,
+                ( void * ) initResults.data( ),
+                Nb * sizeof( T ),
+                cudaMemcpyHostToDevice )
+        );
+
+        if( Nb > 1024 ) {
+            int noBlocks = ( int ) ceil( Nb / 1024.0 );
+            ComputeResults<T, F><<<noBlocks, 1024>>>( 
+                combine,
+                key,
+                gwid,
+                d_tree, 
+                d_results, 
+                offset,
+                noLeaves, 
+                batchSize,
+                windowSize, 
+                b_id, 
+                Nb, 
+                slide 
+            );
+            cudaError_t err;
+            if( err = cudaGetLastError( ) ) {
+                printf( 
+                    "Esecuzione Kernel ComputeResults.\nErrore: %d\n", err 
+                );
+            }
+        } else {
+            ComputeResults<T, F><<<1, Nb>>>( 
+                combine,
+                key,
+                gwid,
+                d_tree, 
+                d_results, 
+                offset,
+                noLeaves, 
+                batchSize,
                 windowSize, 
                 b_id, 
                 Nb, 
@@ -254,6 +404,27 @@ public:
         );
         return results;
     }
+
+    list<T> getBatchedTuples( ) {
+
+        gpuErrChk( 
+            cudaMemcpy( 
+                ( void * ) tuples,
+                ( void * ) ( d_tree + offset ),
+                ( batchSize - offset ) * sizeof( T ),
+                cudaMemcpyDeviceToHost
+            )
+        );
+        gpuErrChk( 
+            cudaMemcpy( 
+                ( void * ) ( tuples + batchSize - offset ),
+                ( void * ) d_tree,
+                offset * sizeof( T ),
+                cudaMemcpyDeviceToHost
+            )
+        );
+        return list<T>( tuples, tuples + batchSize );
+    }
     
     BatchedFAT( BatchedFAT const & ) = delete;
     BatchedFAT& operator=( BatchedFAT const & ) = delete;
@@ -270,15 +441,18 @@ public:
       windowSize( move( _fat.windowSize ) ),
       slide( move( _fat.slide ) ),
       Nb( move( _fat.Nb ) ),
+      offset( move( _fat.offset ) ),
       combine( move( _fat.combine ) )
     { 
         gpuErrChk( cudaMalloc( ( void ** ) &d_tree, treeMemSize ) );
         gpuErrChk( cudaMalloc( ( void ** )&d_results, Nb * sizeof( T ) ) );
+        tuples = new T[batchSize];
     }
 
     ~BatchedFAT( ) {
         gpuErrChk( cudaFree( d_tree ) );
         gpuErrChk( cudaFree( d_results ) );
+        delete[] tuples;
     }
 };
 

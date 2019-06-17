@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
         };
 
         Win_FAT_GPU< tuple_t, tuple_t, decltype( G ), tuple_t > win_fat(
-            G, L, win_len, win_slide, batch_len, "test_sum_fat"
+            G, L, win_len, win_slide, batch_len, false, "test_sum_fat"
         );
             
 	Generator generator2(stream_len, num_keys);

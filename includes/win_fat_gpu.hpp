@@ -41,6 +41,7 @@
 #include <unordered_map>
 #include <math.h>
 #include <cassert>
+#include <iostream>
 
 #include <ff/node.hpp>
 #include <window.hpp>
@@ -107,7 +108,7 @@ private:
     // struct of a key descriptor
     struct Key_Descriptor
     {
-        archive_t archive; // archive of tuples of this key
+        list<result_t> tuples;
         BatchedFAT<result_t, win_F_t> bfat;
         list<win_t> wins; // open windows of this key
         uint64_t emit_counter; // progressive counter (used if role is PLQ or MAP)
@@ -130,7 +131,7 @@ private:
             size_t _slide,
             f_compare_t _compare,
             uint64_t _emit_counter = 0 )
-        : archive( _compare ),
+        : tuples( ),
           bfat( _combine, _batchSize, _numWindows,  _windowSize, _slide ),
           emit_counter(_emit_counter),
           rcv_counter(0),
@@ -140,7 +141,7 @@ private:
 
         // move constructor
         Key_Descriptor(Key_Descriptor &&_k):
-                       archive(move(_k.archive)),
+                       tuples( move( _k.tuples ) ),
                        bfat( move( _k.bfat ) ),
                        wins(move(_k.wins)),
                        emit_counter(_k.emit_counter),
@@ -169,6 +170,8 @@ private:
     size_t tuples_per_batch; // number of tuples per batch (only for CB windows)
     win_F_t winFunction; // function to be executed per window
     f_winlift_t winLift;
+    bool rebuildFAT;
+    bool isFirstBatch;
     result_t *host_results = nullptr; // array of results copied back from the GPU
     // GPU variables
     cudaStream_t cudaStream; // CUDA stream used by this Win_Seq_GPU instance
@@ -196,6 +199,7 @@ private:
                 uint64_t _win_len,
                 uint64_t _slide_len,
                 size_t _batch_len,
+                bool _rebuildFAT,
                 string _name,
                 PatternConfig _config,
                 role_t _role)
@@ -205,6 +209,8 @@ private:
                 win_len(_win_len),
                 slide_len(_slide_len),
                 winType( CB ),
+                rebuildFAT( _rebuildFAT ),
+                isFirstBatch( true ),
                 batch_len(_batch_len),
                 n_thread_block( 0 ),
                 name(_name),
@@ -245,9 +251,10 @@ public:
                 uint64_t _win_len,
                 uint64_t _slide_len,
                 size_t _batch_len,
+                bool _rebuildFAT,
                 string _name )
                 :
-                Win_FAT_GPU( _winFunction, _winLift, _win_len, _slide_len, _batch_len, name, PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ ) { }
+                Win_FAT_GPU( _winFunction, _winLift, _win_len, _slide_len, _batch_len, _rebuildFAT, name, PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ ) { }
 
 //@cond DOXY_IGNORE
 
@@ -355,12 +362,7 @@ public:
                 }
             }
         }
-        // copy the tuple into the archive of the corresponding key
-        if (!isEOSMarker<tuple_t, input_t>(*wt)) {
-            result_t res;
-            winLift( key, t->id, *t, res );
-            (key_d.archive).insert( res );
-        }
+
         auto &wins = key_d.wins;
         // create all the new windows that need to be opened by the arrival of t
         for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
@@ -369,7 +371,7 @@ public:
             wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
             key_d.next_lwid++;
         }
-
+        
         // last received tuple already in the archive
         auto& win = wins.front( );
         if( win.onTuple( *t ) == FIRED ) {
@@ -384,13 +386,28 @@ public:
 #endif
 
                 vector<result_t> batchedTuples( 
-                    key_d.archive.begin( ), 
-                    key_d.archive.end( ) - 1 
+                    key_d.tuples.begin( ), 
+                    key_d.tuples.end( )
                 );
-                key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
-                key_d.archive.purge( 
-                    *( key_d.archive.begin( ) + batch_len * slide_len )
-                );
+                if( rebuildFAT ) {
+                    key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
+                    auto it = key_d.tuples.begin( );
+                    for( size_t i = 0; i < batch_len * slide_len; i++ ) {
+                        it++;
+                    }
+                    key_d.tuples.erase( 
+                        key_d.tuples.begin( ),
+                        it
+                    );
+                } else {
+                    if( isFirstBatch ) {
+                        key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
+                        isFirstBatch = false;
+                    } else {
+                        key_d.bfat.update( move( batchedTuples ), key, 0, 0 );
+                    }
+                    key_d.tuples.clear( );
+                }
                 auto results = key_d.bfat.getResults( );
                 for( size_t i = 0; i < batch_len; i++ ) {
                     result_t *res = new result_t( );
@@ -412,6 +429,11 @@ public:
                 key_d.batchedWin = 0;
                 (key_d.gwids).clear();
             }
+        }
+        if (!isEOSMarker<tuple_t, input_t>(*wt)) {
+            result_t res;
+            winLift( key, t->id, *t, res );
+            (key_d.tuples).push_back( res );
         }
 
         // delete the received tuple
@@ -441,15 +463,25 @@ public:
             size_t key = k.first;
             Key_Descriptor &key_d = k.second;
             auto &wins = key_d.wins;
+            list<result_t> tuples;
+            if( !rebuildFAT && !isFirstBatch ) {
+                tuples = key_d.bfat.getBatchedTuples( );
+                for( size_t i = 0; i < batch_len * slide_len; i++ ) {
+                    tuples.pop_front( );
+                }
+            }
+            tuples.insert( 
+                tuples.end( ), 
+                key_d.tuples.begin( ), 
+                key_d.tuples.end( ) 
+            );
             for( auto gwid : key_d.gwids ) {
                 
-                vector<result_t> batchedTuples( 
-                    key_d.archive.begin( ), 
-                    key_d.archive.begin( ) + win_len 
-                );
                 result_t *res = new result_t( );
-                for( auto &t : batchedTuples ) {
-                    winFunction( key, gwid, t, *res, *res );
+                auto it = tuples.begin( );
+                for( size_t i = 0; i < win_len; it++, i++ ) 
+                {
+                    winFunction( key, gwid, *it, *res, *res );
                 }
                 res->key = key;
                 res->id = gwid;
@@ -463,20 +495,20 @@ public:
                     res->setInfo(key, new_id, std::get<2>(res->getInfo()));
                     key_d.emit_counter++;
                 }
-                key_d.archive.purge( 
-                    *( key_d.archive.begin( ) + slide_len )
-                );
+                for( size_t i = 0; i < slide_len; i++ ) {
+                    tuples.pop_front( );
+                }
                 this->ff_send_out(res);
             }
             for( auto &win : wins ) {
                 auto gwid = win.getGWID( );
-                vector<result_t> batchedTuples( 
-                    key_d.archive.begin( ), 
-                    key_d.archive.end( )
-                );
+
                 result_t *res = new result_t( );
-                for( auto &t : batchedTuples ) {
-                    winFunction( key, gwid, t, *res, *res );
+                for( auto it = tuples.begin( );
+                     it != tuples.end( ); 
+                     it++ ) 
+                {
+                    winFunction( key, gwid, *it, *res, *res );
                 }
                 res->key = key;
                 res->id = gwid;
@@ -490,9 +522,9 @@ public:
                     res->setInfo(key, new_id, std::get<2>(res->getInfo()));
                     key_d.emit_counter++;
                 }
-                key_d.archive.purge( 
-                    *( key_d.archive.begin( ) + slide_len )
-                );
+                for( size_t i = 0; i < slide_len && tuples.size( ) > 0; i++ ) {
+                    tuples.pop_front( );
+                }
                 this->ff_send_out(res);
             }
         }
