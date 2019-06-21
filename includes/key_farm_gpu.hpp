@@ -70,6 +70,11 @@ private:
     using wrapper_in_t = wrapper_tuple_t<tuple_t>;
     // type of the Win_Seq_GPU to be created within the regular constructor
     using win_seq_gpu_t = Win_Seq_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+
+    using win_fat_gpu_t = Win_FAT_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+
+    using f_winlift_t =
+        function<int( size_t, uint64_t, const tuple_t &, result_t & )>;
     // type of the KF_Emitter node
     using kf_emitter_t = KF_Emitter<tuple_t, input_t>;
     // type of the KF_Collector node
@@ -153,6 +158,52 @@ public:
         // create the Win_Seq_GPU instances
         for (size_t i = 0; i < _pardegree; i++) {
             auto *seq = new win_seq_gpu_t(_winFunction, _win_len, _slide_len, _winType, _batch_len, _n_thread_block, _name + "_kf", _scratchpad_size);
+            w[i] = seq;
+        }
+        ff_farm::add_workers(w);
+        ff_farm::add_collector(nullptr);
+        // create the Emitter node
+        ff_farm::add_emitter(new kf_emitter_t(_routing, _pardegree));
+        // when the Key_Farm_GPU will be destroyed we need aslo to destroy the emitter, workers and collector
+        ff_farm::cleanup_all();
+    }
+    
+    Key_Farm_GPU(win_F_t _winFunction,
+                 f_winlift_t _winLift,
+                 uint64_t _win_len,
+                 uint64_t _slide_len,
+                 bool _rebuildFAT,
+                 size_t _pardegree,
+                 size_t _batch_len,
+                 string _name,
+                 f_routing_t _routing=[](size_t k, size_t n) { return k%n; },
+                 opt_level_t _opt_level=LEVEL0): hasComplexWorkers(false), opt_level(_opt_level), winType(CB)
+    {
+        // check the validity of the windowing parameters
+        if (_win_len == 0 || _slide_len == 0) {
+            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the parallelism degree
+        if (_pardegree == 0) {
+            cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the batch length
+        if (_batch_len == 0) {
+            cerr << RED << "WindFlow Error: batch length cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the optimization level
+        if (_opt_level != LEVEL0) {
+            cerr << YELLOW << "WindFlow Warning: optimization level has no effect" << DEFAULT << endl;
+            opt_level = LEVEL0;
+        }
+        // vector of Win_Seq_GPU instances
+        vector<ff_node *> w(_pardegree);
+        // create the Win_Seq_GPU instances
+        for (size_t i = 0; i < _pardegree; i++) {
+            auto *seq = new win_fat_gpu_t( _winFunction, _winLift, _win_len, _slide_len, _batch_len, _rebuildFAT, _name + "_kf" );
             w[i] = seq;
         }
         ff_farm::add_workers(w);

@@ -254,7 +254,7 @@ public:
                 bool _rebuildFAT,
                 string _name )
                 :
-                Win_FAT_GPU( _winFunction, _winLift, _win_len, _slide_len, _batch_len, _rebuildFAT, name, PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ ) { }
+                Win_FAT_GPU( _winFunction, _winLift, _win_len, _slide_len, _batch_len, _rebuildFAT, _name, PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ ) { }
 
 //@cond DOXY_IGNORE
 

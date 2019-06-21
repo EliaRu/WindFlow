@@ -42,6 +42,7 @@
 #include <wf_nodes.hpp>
 #include <pane_farm_gpu.hpp>
 #include <win_mapreduce_gpu.hpp>
+#include <win_fat_gpu.hpp>
 
 /** 
  *  \class Win_Farm_GPU
@@ -65,6 +66,11 @@ private:
     using wrapper_in_t = wrapper_tuple_t<tuple_t>;
     // type of the Win_Seq_GPU to be created within the regular constructor
     using win_seq_gpu_t = Win_Seq_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+
+    using win_fat_gpu_t = Win_FAT_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+
+    using f_winlift_t =
+        function<int( size_t, uint64_t, const tuple_t &, result_t & )>;
     // type of the WF_Emitter node
     using wf_emitter_t = WF_Emitter<tuple_t, input_t>;
     // type of the WF_Collector node
@@ -178,6 +184,94 @@ private:
         ff_farm::cleanup_all();
     }
 
+    Win_Farm_GPU(win_F_t _winFunction,
+                 f_winlift_t _winLift,
+                 uint64_t _win_len,
+                 uint64_t _slide_len,
+                 bool _rebuildFAT,
+                 size_t _emitter_degree,
+                 size_t _pardegree,
+                 size_t _batch_len,
+                 string _name,
+                 bool _ordered,
+                 opt_level_t _opt_level,
+                 PatternConfig _config,
+                 role_t _role): hasComplexWorkers(false), opt_level(_opt_level), winType(CB), num_emitters(_emitter_degree)
+    {
+        // check the validity of the windowing parameters
+        if (_win_len == 0 || _slide_len == 0) {
+            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the emitter degree
+        if (_emitter_degree == 0) {
+            cerr << RED << "WindFlow Error: at least one emitter is needed" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the parallelism degree
+        if (_pardegree == 0) {
+            cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the batch length
+        if (_batch_len == 0) {
+            cerr << RED << "WindFlow Error: batch length cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the optimization level
+        if (_opt_level != LEVEL0) {
+            cerr << YELLOW << "WindFlow Warning: optimization level has no effect" << DEFAULT << endl;
+            opt_level = LEVEL0;
+        }
+        // vector of Win_Seq_GPU instances
+        vector<ff_node *> w;
+        // private sliding factor of each Win_Seq_GPU instance
+        uint64_t private_slide = _slide_len * _pardegree;
+        // standard case: one Emitter node
+        if (_emitter_degree == 1) {
+            // create the Win_Seq_GPU instances
+            for (size_t i = 0; i < _pardegree; i++) {
+                // configuration structure of the Win_Seq_GPU instances
+                PatternConfig configSeq(_config.id_inner, _config.n_inner, _config.slide_inner, i, _pardegree, _slide_len);
+                auto *seq = new win_fat_gpu_t( _winFunction, _winLift, _win_len, private_slide, _batch_len, _rebuildFAT, _name + "_wf", configSeq, _role );
+                w.push_back(seq);
+            }
+        }
+        // advanced case: multiple Emitter nodes
+        else {
+            ff_a2a *a2a = new ff_a2a();
+            // create the Emitter nodes
+            vector<ff_node *> emitters(_emitter_degree);
+            for (size_t i = 0; i < _emitter_degree; i++) {
+                auto *emitter = new wf_emitter_t(winType, _win_len, _slide_len, _pardegree, _config.id_inner, _config.n_inner, _config.slide_inner, _role);
+                emitters[i] = emitter;
+            }
+            a2a->add_firstset(emitters, 0, true);
+            // create the Win_Seq_GPU nodes composed with an orderingNodes
+            vector<ff_node *> seqs(_pardegree);
+            for (size_t i = 0; i < _pardegree; i++) {
+                auto *ord = new OrderingNode<tuple_t, wrapper_in_t>(((winType == CB) ? ID : TS));
+                // configuration structure of the Win_Seq_GPU instances
+                PatternConfig configSeq(_config.id_inner, _config.n_inner, _config.slide_inner, i, _pardegree, _slide_len);
+                auto *seq = new win_fat_gpu_t( _winFunction, _winLift, _win_len, private_slide, _batch_len, _rebuildFAT, _name + "_wf", configSeq, _role );
+                auto *comb = new ff_comb(ord, seq, true, true);
+                seqs[i] = comb;
+            }
+            a2a->add_secondset(seqs, true);
+            w.push_back(a2a);
+        }
+        ff_farm::add_workers(w);
+        // create the Emitter and Collector nodes
+        if (_emitter_degree == 1)
+            ff_farm::add_emitter(new wf_emitter_t(winType, _win_len, _slide_len, _pardegree, _config.id_inner, _config.n_inner, _config.slide_inner, _role));
+        if (_ordered)
+            ff_farm::add_collector(new wf_collector_t());
+        else
+            ff_farm::add_collector(nullptr);
+        // when the Win_Farm_GPU will be destroyed we need aslo to destroy the emitter, workers and collector
+        ff_farm::cleanup_all();
+    }
+
     // method to optimize the structure of the Win_Farm_GPU pattern
     void optimize_WinFarmGPU(opt_level_t opt)
     {
@@ -223,6 +317,22 @@ public:
                  :
                  Win_Farm_GPU(_winFunction, _win_len, _slide_len, _winType, _emitter_degree, _pardegree, _batch_len, _n_thread_block, _name, _scratchpad_size, _ordered, _opt_level, PatternConfig(0, 1, _slide_len, 0, 1, _slide_len), SEQ) {}
 
+
+    
+    Win_Farm_GPU(win_F_t _winFunction,
+                 f_winlift_t _winLift,
+                 uint64_t _win_len,
+                 uint64_t _slide_len,
+                 bool _rebuildFAT,
+                 size_t _emitter_degree,
+                 size_t _pardegree,
+                 size_t _batch_len,
+                 string _name,
+                 bool _ordered = true,
+                 opt_level_t _opt_level = LEVEL0 )
+                 :
+                 Win_Farm_GPU( _winFunction, _winLift, _win_len, _slide_len, _rebuildFAT, _emitter_degree, _pardegree, _batch_len, _name, _ordered, _opt_level, PatternConfig( 0, 1, _slide_len, 0, 1, _slide_len ), SEQ ) { }
+                
     /** 
      *  \brief Constructor II (Nesting with Pane_Farm_GPU)
      *  
