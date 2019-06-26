@@ -150,9 +150,13 @@ public:
         front = n - 1;
         back = n - 1;
         tree.resize( n * 2 );
+        tuple_t t;
+        for( size_t i = 0; i < n * 2; ++i ) {
+            winLift( 0, 0, t, tree[i] );
+        }
     }
 
-    int insert( size_t key, uint64_t id, tuple_t const& input ) {
+    int insert( size_t key, uint64_t id, result_t const& input ) {
         //Checks if the tree is empty
         if( front == back && front == n - 1 ) {
             front++, back++;
@@ -172,13 +176,11 @@ public:
             return -1;
         }
         //Insert the element in the next empty position
-        if( winLift( key, id, input, tree[back] ) < 0 ) {
-            return -1;
-        }
+        tree[back] = input;
         return update( key, id, back );
     }
 
-    int insert( size_t key, uint64_t id, vector<tuple_t> const& inputs ) 
+    int insert( size_t key, uint64_t id, vector<result_t> const& inputs ) 
     {
         list<size_t> nodesToUpdate;
         for( size_t i = 0; i < inputs.size( ); i++ ) {
@@ -200,10 +202,7 @@ public:
             } else {
                 return -1;
             }
-            //Insert the element in the next empty position
-            if( winLift( key, id, inputs[i], tree[back] ) < 0 ) {
-                return -1;
-            }
+            tree[back] = inputs[i];
             size_t p = parent( back );
             if( back != root &&
                 ( nodesToUpdate.empty( ) || 

@@ -258,6 +258,56 @@ public:
         // when the Key_Farm will be destroyed we need aslo to destroy the emitter, workers and collector
         ff_farm::cleanup_all();
     }
+
+    Key_Farm(f_winlift_t _winLift,
+             f_wincombine_t _winCombine, 
+             bool _isCommutative,
+             uint64_t _win_len,
+             uint64_t _slide_len,
+             uint64_t _quantum,
+             size_t _pardegree,
+             string _name,
+             f_routing_t _routing=[](size_t k, size_t n) { return k%n; },
+             opt_level_t _opt_level=LEVEL0): hasComplexWorkers(false), opt_level(_opt_level), winType(CB)
+    {
+        // check the validity of the windowing parameters
+        if (_win_len == 0 || _slide_len == 0) {
+            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the validity of the parallelism degree
+        if (_pardegree == 0) {
+            cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // check the optimization level
+        if (_opt_level != LEVEL0) {
+            cerr << YELLOW << "WindFlow Warning: optimization level has no effect" << DEFAULT << endl;
+            opt_level = LEVEL0;
+        }
+        // vector of Win_Seq instances
+        vector<ff_node *> w(_pardegree);
+        // create the Win_Seq instances
+        for (size_t i = 0; i < _pardegree; i++) {
+            auto *seq = new win_seq_t(
+                _winLift, 
+                _winCombine, 
+                _isCommutative, 
+                _win_len, 
+                _slide_len, 
+                _quantum,
+                _name + "_kf"
+            );
+            w[i] = seq;
+        }
+        ff_farm::add_workers(w);
+        ff_farm::add_collector(nullptr);
+        // create the Emitter node
+        ff_farm::add_emitter(new kf_emitter_t(_routing, _pardegree));
+        // when the Key_Farm will be destroyed we need aslo to destroy the emitter, workers and collector
+        ff_farm::cleanup_all();
+    }
+
     /** 
      *  \brief Constructor III (Nesting with Pane_Farm)
      *  

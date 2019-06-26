@@ -100,7 +100,7 @@ __global__ void ComputeResults(
     }
 }
 
-template<typename T, typename F>
+template<typename U, typename T, typename F>
 class BatchedFAT {
 private:
 /*
@@ -111,6 +111,10 @@ private:
  * nodo << 1 + 1 figlio sinistro
  * nodo << 1 * 2 figlio destro
  */
+
+    using f_winlift_t =
+        function<int( size_t, uint64_t, const U&, T& )>;
+
     T* d_tree;
     T* d_results;
     T* tuples;
@@ -127,11 +131,14 @@ private:
     size_t Nb;
     size_t offset;
     F combine;
+    f_winlift_t winLift;
+    T zero;
 
 public:
     BatchedFAT( ) { }
 
     BatchedFAT( 
+        f_winlift_t _winLift,
         F _combine,
         size_t _batchSize,
         size_t _numWindows,
@@ -144,7 +151,8 @@ public:
         windowSize( _windowSize ),
         slide( _slide ),
         offset( 0 ),
-        combine( _combine )
+        combine( _combine ),
+        winLift( _winLift )
     { 
         size_t noBits = ( size_t ) ceil( log2( batchSize ) );
         size_t n = 1 << noBits;
@@ -155,10 +163,13 @@ public:
         leavesMemSize = noLeaves * sizeof( T );
         batchMemSize = batchSize * sizeof( T );
 
+        U tmp;
+        winLift( 0, 0, tmp, zero );
+
         gpuErrChk( cudaMalloc( ( void ** ) &d_tree, treeMemSize ) );
 
         results.resize( Nb );
-        initResults.resize( Nb );
+        initResults.resize( Nb, zero );
         gpuErrChk( cudaMalloc( ( void ** )&d_results, Nb * sizeof( T ) ) );
         tuples = new T[batchSize];
     }
@@ -172,7 +183,7 @@ public:
         if( tuples.size( ) != batchSize ) return false;
 
         vector<T> tree( tuples.begin( ), tuples.end( ) );
-        tree.insert( tree.end( ), treeSize - batchSize, T( ) );
+        tree.insert( tree.end( ), treeSize - batchSize, zero );
         assert( tree.size( ) == treeSize );
 
         gpuErrChk( cudaMemcpy( 
