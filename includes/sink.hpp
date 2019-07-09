@@ -26,15 +26,15 @@
  *  This file implements the Sink pattern in charge of absorbing the items of
  *  a data stream.
  *  
- *  The template argument tuple_t must be default constructible, with a copy constructor
- *  and copy assignment operator, and it must provide and implement the setInfo() and
- *  getInfo() methods.
+ *  The template parameter tuple_t must be default constructible, with a copy Constructor
+ *  and copy assignment operator, and it must provide and implement the setControlFields() and
+ *  getControlFields() methods.
  */ 
 
 #ifndef SINK_H
 #define SINK_H
 
-// includes
+/// includes
 #include <string>
 #if __cplusplus < 201703L //not C++17
     #include <experimental/optional>
@@ -42,11 +42,13 @@
 #else
     #include <optional>
 #endif
-#include <ff/multinode.hpp>
 #include <ff/farm.hpp>
+#include <ff/multinode.hpp>
 #include <context.hpp>
+#include <standard.hpp>
 
 using namespace ff;
+using namespace std;
 
 /** 
  *  \class Sink
@@ -62,9 +64,12 @@ public:
     /// type of the sink function
     using sink_func_t = function<void(optional<tuple_t> &)>;
     /// type of the rich sink function
-    using rich_sink_func_t = function<void(optional<tuple_t> &, RuntimeContext)>;
-    /// function type to map the key onto an identifier starting from zero to pardegree-1
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    using rich_sink_func_t = function<void(optional<tuple_t> &, RuntimeContext &)>;
+    /// type of the closing function
+    using closing_func_t = function<void(RuntimeContext &)>;
+    /// type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
+
 private:
     // friendships with other classes in the library
     friend class MultiPipe;
@@ -75,9 +80,10 @@ private:
     private:
         sink_func_t sink_fun; // sink function
         rich_sink_func_t rich_sink_func; // rich sink function
+        closing_func_t closing_func; // closing function
         string name; // string of the unique name of the pattern
         bool isRich; // flag stating whether the function to be used is rich (i.e. it receives the RuntimeContext object)
-        RuntimeContext context; // RuntimeContext instance
+        RuntimeContext context; // RuntimeContext
 #if defined(LOG_DIR)
         unsigned long rcvTuples = 0;
         double avg_td_us = 0;
@@ -85,12 +91,13 @@ private:
         volatile unsigned long startTD, startTS, endTD, endTS;
         ofstream *logfile = nullptr;
 #endif
+
     public:
         // Constructor I
-        Sink_Node(sink_func_t _sink_fun, string _name): sink_fun(_sink_fun), name(_name), isRich(false) {}
+        Sink_Node(sink_func_t _sink_fun, string _name, RuntimeContext _context, closing_func_t _closing_func): sink_fun(_sink_fun), name(_name), isRich(false), context(_context), closing_func(_closing_func) {}
 
         // Constructor II
-        Sink_Node(rich_sink_func_t _rich_sink_fun, string _name, RuntimeContext _context): rich_sink_func(_rich_sink_fun), name(_name), isRich(true), context(_context) {}
+        Sink_Node(rich_sink_func_t _rich_sink_fun, string _name, RuntimeContext _context, closing_func_t _closing_func): rich_sink_func(_rich_sink_fun), name(_name), isRich(true), context(_context), closing_func(_closing_func) {}
 
         // svc_init method (utilized by the FastFlow runtime)
         int svc_init()
@@ -149,6 +156,8 @@ private:
         // svc_end method (utilized by the FastFlow runtime)
         void svc_end()
         {
+            // call the closing function
+            closing_func(context);
 #if defined (LOG_DIR)
             ostringstream stream;
             stream << "************************************LOG************************************\n";
@@ -170,22 +179,23 @@ public:
      *  \param _func sink function
      *  \param _pardegree parallelism degree of the Sink pattern
      *  \param _name string with the unique name of the Sink pattern
+     *  \param _closing_func closing function
      */ 
-    Sink(sink_func_t _func, size_t _pardegree, string _name): keyed(false)
+    Sink(sink_func_t _func, size_t _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Sink_Node instances
+        // vector of Sink_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Sink_Node(_func, _name);
+            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // when the Sink will be destroyed we need aslo to destroy the emitter and workers
@@ -198,23 +208,24 @@ public:
      *  \param _func sink function
      *  \param _pardegree parallelism degree of the Sink pattern
      *  \param _name string with the unique name of the Sink pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
-    Sink(sink_func_t _func, size_t _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Sink(sink_func_t _func, size_t _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Sink_Node instances
+        // vector of Sink_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Sink_Node(_func, _name);
+            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // when the Sink will be destroyed we need aslo to destroy the emitter and workers
@@ -227,22 +238,23 @@ public:
      *  \param _func rich sink function
      *  \param _pardegree parallelism degree of the Sink pattern
      *  \param _name string with the unique name of the Sink pattern
+     *  \param _closing_func closing function
      */ 
-    Sink(rich_sink_func_t _func, size_t _pardegree, string _name): keyed(false)
+    Sink(rich_sink_func_t _func, size_t _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Sink_Node instances
+        // vector of Sink_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // when the Sink will be destroyed we need aslo to destroy the emitter and workers
@@ -255,23 +267,24 @@ public:
      *  \param _func rich sink function
      *  \param _pardegree parallelism degree of the Sink pattern
      *  \param _name string with the unique name of the Sink pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
-    Sink(rich_sink_func_t _func, size_t _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Sink(rich_sink_func_t _func, size_t _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Sink_Node instances
+        // vector of Sink_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Sink_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // when the Sink will be destroyed we need aslo to destroy the emitter and workers

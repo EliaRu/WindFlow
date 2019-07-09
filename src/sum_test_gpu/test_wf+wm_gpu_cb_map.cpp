@@ -77,39 +77,33 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined map function (Non-Incremental Query on GPU)
-	auto F = [] __host__ __device__ (size_t key, size_t wid, const tuple_t *data, tuple_t *res, size_t size, char *memory) {
+	auto F = [] __host__ __device__ (size_t wid, const tuple_t *data, tuple_t *res, size_t size, char *memory) {
 		long sum = 0;
 		for (size_t i=0; i<size; i++) {
 			sum += data[i].value;
 		}
-		res->key = key;
-		res->id = wid;
 		res->value = sum;
-		return 0;
 	};
 	// user-defined reduce function (Non-Incremental Query)
-	auto G = [](size_t key, size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
+	auto G = [](size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
 		long sum = 0;
 		for (auto t: input) {
 			int val = t.value;
 			sum += val;
 		}
-		win_result.key = key;
-		win_result.id = wid;
 		win_result.value = sum;
-		return 0;
 	};
 	// creation of the Win_MapReduce_GPU pattern
-	auto *wm_gpu = WinMapReduceGPU_Builder<decltype(F), decltype(G)>(F, G).withCBWindow(win_len, win_slide)
+	auto *wm_gpu = WinMapReduceGPU_Builder<decltype(F), decltype(G)>(F, G).withCBWindows(win_len, win_slide)
 													     .withParallelism(map_degree, reduce_degree)
 													     .withBatch(batch_len)
 													     .withName("test_sum")
-													     .withOpt(LEVEL)
+													     .withOptLevel(LEVEL)
 													     .build_ptr();
 	// creation of the Win_Farm_GPU pattern
 	auto *wf_gpu = WinFarmGPU_Builder<decltype(*wm_gpu)>(*wm_gpu).withParallelism(wf_degree)
 													             .withName("test_sum")
-													             .withOpt(LEVEL)
+													             .withOptLevel(LEVEL)
 													             .build_ptr();
 	// creation of the pipeline
 	Generator generator(stream_len, num_keys);

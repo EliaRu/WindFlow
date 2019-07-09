@@ -16,14 +16,14 @@
 # Author: Gabriele Mencagli <mencagli@di.unipi.it>
 # Date:   February 2019
 
-FF_ROOT			= $(HOME)/fastflow
+FF_ROOT			= ../../fastflow
 OUT_DIR			= ../../bin/accumulator_test
 INCLUDE_DIR		= ../../includes
 
 CXX 			= /usr/local/gcc-7.2.0/bin/g++
 CXXFLAGS		= -std=c++17
 INCLUDES		= -I $(FF_ROOT) -I $(INCLUDE_DIR) -I .
-MACROS 			= # -DTRACE_FASTFLOW -DLOG_DIR="../../log"
+MACROS 			= -DTRACE_FASTFLOW -DLOG_DIR="../../log"
 OPTFLAGS		= -g -O3 -finline-functions
 LDFLAGS			= -pthread
 

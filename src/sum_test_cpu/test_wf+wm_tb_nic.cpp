@@ -73,31 +73,24 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined map and reduce functions (Non-Incremental Query)
-	auto F = [](size_t key, size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
+	auto F = [](size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
 		long sum = 0;
 		// print the window content
-		string window = string("Key: ") + to_string(key) + " window " + to_string(wid) + " [";
 		for (auto t : input) {
 			int val = t.value;
-			window += to_string(val) + ", ";
 			sum += val;
 		}
-		window = window + "] -> Sum "+ to_string(sum);
-		//cout << window << endl;
-		win_result.key = key;
-		win_result.ts = wid;
 		win_result.value = sum;
-		return 0;
 	};
 	// creation of the Win_MapReduce and Win_Farm patterns
-	Win_MapReduce wm = WinMapReduce_Builder(F, F).withTBWindow(microseconds(win_len), microseconds(win_slide))
+	Win_MapReduce wm = WinMapReduce_Builder(F, F).withTBWindows(microseconds(win_len), microseconds(win_slide))
 									.withParallelism(map_degree, reduce_degree)
 									.withName("test_sum")
-									.withOpt(LEVEL)
+									.withOptLevel(LEVEL)
 									.build();
 	Win_Farm wf = WinFarm_Builder(wm).withParallelism(wf_degree)
 									.withName("test_sum")
-									.withOpt(LEVEL)
+									.withOptLevel(LEVEL)
 									.build();
 	// creation of the pipeline
 	Generator generator(stream_len, num_keys);

@@ -27,15 +27,15 @@
  *  on each tuple of the input data stream. The transformation should be stateless and
  *  must produce one output result for each input tuple consumed.
  *  
- *  The template arguments tuple_t and result_t must be default constructible, with a copy constructor
- *  and copy assignment operator, and they must provide and implement the setInfo() and
- *  getInfo() methods.
+ *  The template parameters tuple_t and result_t must be default constructible, with a
+ *  copy Constructor and copy assignment operator, and they must provide and implement
+ *  the setControlFields() and getControlFields() methods.
  */ 
 
 #ifndef MAP_H
 #define MAP_H
 
-// includes
+/// includes
 #include <string>
 #include <ff/node.hpp>
 #include <ff/farm.hpp>
@@ -43,6 +43,7 @@
 #include <standard.hpp>
 
 using namespace ff;
+using namespace std;
 
 /** 
  *  \class Map
@@ -59,13 +60,16 @@ public:
     /// type of the map function (in-place version)
     using map_func_ip_t = function<void(tuple_t &)>;
     /// type of the rich map function (in-place version)
-    using rich_map_func_ip_t = function<void(tuple_t &, RuntimeContext)>;
+    using rich_map_func_ip_t = function<void(tuple_t &, RuntimeContext &)>;
     /// type of the map function (not in-place version)
     using map_func_nip_t = function<void(const tuple_t &, result_t &)>;
     /// type of the rich map function (not in-place version)
-    using rich_map_func_nip_t = function<void(const tuple_t &, result_t &, RuntimeContext)>;
-    /// function type to map the key onto an identifier starting from zero to pardegree-1
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    using rich_map_func_nip_t = function<void(const tuple_t &, result_t &, RuntimeContext &)>;
+    /// type of the closing function
+    using closing_func_t = function<void(RuntimeContext &)>;
+    /// type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
+
 private:
     // friendships with other classes in the library
     friend class MultiPipe;
@@ -78,10 +82,11 @@ private:
         rich_map_func_ip_t rich_func_ip; // in-place rich map function
         map_func_nip_t func_nip; // not in-place map function
         rich_map_func_nip_t rich_func_nip; // not in-place rich map function
+        closing_func_t closing_func; // closing function
         string name; // string of the unique name of the pattern
         bool isIP; // flag stating if the in-place map function should be used (otherwise the not in-place version)
         bool isRich; // flag stating whether the function to be used is rich (i.e. it receives the RuntimeContext object)
-        RuntimeContext context; // RuntimeContext instance
+        RuntimeContext context; // RuntimeContext
 #if defined(LOG_DIR)
         unsigned long rcvTuples = 0;
         double avg_td_us = 0;
@@ -89,26 +94,27 @@ private:
         volatile unsigned long startTD, startTS, endTD, endTS;
         ofstream *logfile = nullptr;
 #endif
+
     public:
         // Constructor I
         template <typename T=string>
-        Map_Node(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _name):
-                 func_ip(_func), name(_name), isIP(true), isRich(false) {}
+        Map_Node(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _name, RuntimeContext _context, closing_func_t _closing_func):
+                 func_ip(_func), name(_name), isIP(true), isRich(false), context(_context), closing_func(_closing_func) {}
 
         // Constructor II
         template <typename T=string>
-        Map_Node(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _name, RuntimeContext _context):
-                 rich_func_ip(_func), name(_name), isIP(true), isRich(true), context(_context) {}
+        Map_Node(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _name, RuntimeContext _context, closing_func_t _closing_func):
+                 rich_func_ip(_func), name(_name), isIP(true), isRich(true), context(_context), closing_func(_closing_func) {}
 
         // Constructor III
         template <typename T=string>
-        Map_Node(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _name):
-                 func_nip(_func), name(_name), isIP(false), isRich(false) {}
+        Map_Node(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _name, RuntimeContext _context, closing_func_t _closing_func):
+                 func_nip(_func), name(_name), isIP(false), isRich(false), context(_context), closing_func(_closing_func) {}
 
         // Constructor IV
         template <typename T=string>
-        Map_Node(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _name, RuntimeContext _context):
-                 rich_func_nip(_func), name(_name), isIP(false), isRich(true), context(_context) {}
+        Map_Node(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _name, RuntimeContext _context, closing_func_t _closing_func):
+                 rich_func_nip(_func), name(_name), isIP(false), isRich(true), context(_context), closing_func(_closing_func) {}
 
         // svc_init method (utilized by the FastFlow runtime)
         int svc_init()
@@ -163,6 +169,8 @@ private:
         // svc_end method (utilized by the FastFlow runtime)
         void svc_end()
         {
+            // call the closing function
+            closing_func(context);
 #if defined (LOG_DIR)
             ostringstream stream;
             stream << "************************************LOG************************************\n";
@@ -184,23 +192,24 @@ public:
      *  \param _func function to be executed on each input tuple (in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
+     *  \param _closing_func closing function
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _pardegree, string _name): keyed(false)
+    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name);
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -215,24 +224,25 @@ public:
      *  \param _func function to be executed on each input tuple (in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, map_func_ip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name);
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -247,23 +257,24 @@ public:
      *  \param _func rich function to be executed on each input tuple (in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
+     *  \param _closing_func closing function
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _pardegree, string _name): keyed(false)
+    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -278,24 +289,25 @@ public:
      *  \param _func rich function to be executed on each input tuple (in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Map(typename enable_if<is_same<T,T>::value && is_same<tuple_t,result_t>::value, rich_map_func_ip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -310,23 +322,24 @@ public:
      *  \param _func function to be executed on each input tuple (not in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
+     *  \param _closing_func closing function
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _pardegree, string _name): keyed(false)
+    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name);
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -341,24 +354,25 @@ public:
      *  \param _func function to be executed on each input tuple (not in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, map_func_nip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name);
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -373,23 +387,24 @@ public:
      *  \param _func rich function to be executed on each input tuple (not in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
+     *  \param _closing_func closing function
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _pardegree, string _name): keyed(false)
+    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func): keyed(false)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>());
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector
@@ -404,24 +419,25 @@ public:
      *  \param _func rich function to be executed on each input tuple (not in-place version)
      *  \param _pardegree parallelism degree of the Map pattern
      *  \param _name string with the unique name of the Map pattern
-     *  \param _routing routing function for the key-based distribution
+     *  \param _closing_func closing function
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      */ 
     template <typename T=size_t>
-    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _pardegree, string _name, f_routing_t _routing): keyed(true)
+    Map(typename enable_if<is_same<T,T>::value && !is_same<tuple_t,result_t>::value, rich_map_func_nip_t>::type _func, T _pardegree, string _name, closing_func_t _closing_func, routing_func_t _routing_func): keyed(true)
     {
         // check the validity of the parallelism degree
         if (_pardegree == 0) {
             cerr << RED << "WindFlow Error: parallelism degree cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // vector of Map_Node instances
+        // vector of Map_Node
         vector<ff_node *> w;
         for (size_t i=0; i<_pardegree; i++) {
-            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i));
+            auto *seq = new Map_Node(_func, _name, RuntimeContext(_pardegree, i), _closing_func);
             w.push_back(seq);
         }
         // add emitter
-        ff_farm::add_emitter(new standard_emitter<tuple_t>(_routing));
+        ff_farm::add_emitter(new Standard_Emitter<tuple_t>(_routing_func, _pardegree));
         // add workers
         ff_farm::add_workers(w);
         // add default collector

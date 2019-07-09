@@ -80,80 +80,60 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined window function (Non-Incremental Query)
-	auto seqFNIC = [](size_t key, size_t wid, Iterable<tuple_t> &input, output_t &result) {
+	auto seqFNIC = [](size_t wid, Iterable<tuple_t> &input, output_t &result) {
 		long sum = 0;
 		// print the window content
-		string win = string("Key: ") + to_string(key) + " window " + to_string(wid) + " [";
 		for (auto t : input) {
 			int val = t.value;
-			win += to_string(val) + ", ";
 			sum += val;
 		}
-		win = win + "] -> Sum "+ to_string(sum);
 		result.value = sum;
-		return 0;
 	};
 	// user-defined window function (Incremental Query)
-	auto seqFINC = [](size_t key, size_t wid, const tuple_t &t, output_t &result) {
+	auto seqFINC = [](size_t wid, const tuple_t &t, output_t &result) {
 		result.value += t.value;
-		return 0;
 	};
 	// user-defined pane function (Non-Incremental Query)
-	auto plqFNIC = [](size_t key, size_t pid, Iterable<tuple_t> &input, output_t &pane_result) {
+	auto plqFNIC = [](size_t pid, Iterable<tuple_t> &input, output_t &pane_result) {
 		long sum = 0;
 		// print the window content
-		string pane = string("Key: ") + to_string(key) + " pane " + to_string(pid) + " [";
 		for (auto t : input) {
 			int val = t.value;
-			pane += to_string(val) + ", ";
 			sum += val;
 		}
-		pane = pane + "] -> Sum "+ to_string(sum);
 		pane_result.value = sum;
-		return 0;
 	};
 	// user-defined window function (Non-Incremental Query)
-	auto wlqFNIC = [](size_t key, size_t wid, Iterable<output_t> &input, output_t &win_result) {
+	auto wlqFNIC = [](size_t wid, Iterable<output_t> &input, output_t &win_result) {
 		long sum = 0;
 		// print the window content
-		string pane = string("Key: ") + to_string(key) + " pane " + to_string(wid) + " [";
 		for (auto t : input) {
 			int val = t.value;
-			pane += to_string(val) + ", ";
 			sum += val;
 		}
-		pane = pane + "] -> Sum "+ to_string(sum);
 		win_result.value = sum;
-		return 0;
 	};
     // user-defined pane function (Incremental Query)
-	auto plqFINC = [](size_t key, size_t pid, const tuple_t &t, output_t &pane_result) {
+	auto plqFINC = [](size_t pid, const tuple_t &t, output_t &pane_result) {
 		pane_result.value += t.value;
-		return 0;
 	};
     // user-defined window function (Incremental Query)
-	auto wlqFINC = [](size_t key, size_t wid, const output_t &r, output_t &win_result) {
+	auto wlqFINC = [](size_t wid, const output_t &r, output_t &win_result) {
 		win_result.value += r.value;
-		return 0;
 	};
 	// user-defined map and reduce functions (Non-Incremental Query)
-	auto wmFNIC = [](size_t key, size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
+	auto wmFNIC = [](size_t wid, Iterable<tuple_t> &input, tuple_t &win_result) {
 		long sum = 0;
 		// print the window content
-		string window = string("Key: ") + to_string(key) + " window " + to_string(wid) + " [";
 		for (auto t : input) {
 			int val = t.value;
-			window += to_string(val) + ", ";
 			sum += val;
 		}
-		window = window + "] -> Sum "+ to_string(sum);
 		win_result.value = sum;
-		return 0;
 	};
 	// user-defined map and reduce functions (Incremental Query)
-	auto wmFINC = [](size_t key, size_t wid, const tuple_t &t, tuple_t &win_result) {
+	auto wmFINC = [](size_t wid, const tuple_t &t, tuple_t &win_result) {
 		win_result.value += t.value;
-		return 0;
 	};
 	// function routingF used by all the Key_Farm instances
 	auto routingF = [](size_t k, size_t n) { return k%n; };
@@ -162,7 +142,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_Seq seqNIC = WinSeq_Builder(seqFNIC).withCBWindow(win_len, win_slide)
+		Win_Seq seqNIC = WinSeq_Builder(seqFNIC).withCBWindows(win_len, win_slide)
 											   .withName("seq_nic")
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe1(generator, seqNIC, consumer);
@@ -176,7 +156,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_Seq seqINC = WinSeq_Builder(seqFINC).withCBWindow(win_len, win_slide)
+		Win_Seq seqINC = WinSeq_Builder(seqFINC).withCBWindows(win_len, win_slide)
 											   .withName("seq_inc")
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe2(generator, seqINC, consumer);
@@ -194,7 +174,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_Farm wfNIC = WinFarm_Builder(seqFNIC).withCBWindow(win_len, win_slide)
+		Win_Farm wfNIC = WinFarm_Builder(seqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree1)
 											   .withName("wf_nic")
 											   .withEmitters(emitter_degree)
@@ -214,7 +194,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_Farm wfINC = WinFarm_Builder(seqFINC).withCBWindow(win_len, win_slide)
+		Win_Farm wfINC = WinFarm_Builder(seqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree1)
 											   .withName("wf_inc")
 											   .withEmitters(emitter_degree)
@@ -234,7 +214,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Key_Farm kfNIC = KeyFarm_Builder(seqFNIC).withCBWindow(win_len, win_slide)
+		Key_Farm kfNIC = KeyFarm_Builder(seqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree1)
 											   .withName("kf_nic")
 											   .build();
@@ -253,7 +233,7 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Key_Farm kfINC = KeyFarm_Builder(seqFINC).withCBWindow(win_len, win_slide)
+		Key_Farm kfINC = KeyFarm_Builder(seqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree1)
 											   .withName("kf_inc")
 											   .build();
@@ -272,10 +252,10 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe7(generator, pfNICNIC, consumer);
 		cout << "Run Test 7 PF(PLQ(NIC), WLQ(NIC)): number of threads " << pipe7.cardinality() << endl;
@@ -292,10 +272,10 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe8(generator, pfNICINC, consumer);
 		cout << "Run Test 8 PF(PLQ(NIC), WLQ(INC)): number of threads " << pipe8.cardinality() << endl;
@@ -312,10 +292,10 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe9(generator, pfINCNIC, consumer);
 		cout << "Run Test 9 PF(PLQ(INC), WLQ(NIC)): number of threads " << pipe9.cardinality() << endl;
@@ -332,10 +312,10 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe10(generator, pfINCINC, consumer);
 		cout << "Run Test 10 PF(PLQ(INC), WLQ(INC)): number of threads " << pipe10.cardinality() << endl;
@@ -352,10 +332,10 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe11(generator, wmNICNIC, consumer);
 		cout << "Run Test 11 WM(MAP(NIC), REDUCE(NIC)): number of threads " << pipe11.cardinality() << endl;
@@ -372,10 +352,10 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe12(generator, wmNICINC, consumer);
 		cout << "Run Test 12 WM(MAP(NIC), REDUCE(INC)): number of threads " << pipe12.cardinality() << endl;
@@ -392,10 +372,10 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe13(generator, wmINCNIC, consumer);
 		cout << "Run Test 13 WM(MAP(INC), REDUCE(NIC)): number of threads " << pipe13.cardinality() << endl;
@@ -412,10 +392,10 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe14(generator, wmINCINC, consumer);
 		cout << "Run Test 14 WM(MAP(INC), REDUCE(INC)): number of threads " << pipe14.cardinality() << endl;
@@ -432,15 +412,15 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(pfNICNIC).withParallelism(degree1)
 											   .withName("wf_pf_nic_nic")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe15(generator, wf, consumer);
 		cout << "Run Test 15 WF(PF(PLQ(NIC), WLQ(NIC))): number of threads " << pipe15.cardinality() << endl;
@@ -457,15 +437,15 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(pfNICINC).withParallelism(degree1)
 											   .withName("wf_pf_nic_inc")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe16(generator, wf, consumer);
 		cout << "Run Test 16 WF(PF(PLQ(NIC), WLQ(INC))): number of threads " << pipe16.cardinality() << endl;
@@ -482,15 +462,15 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(pfINCNIC).withParallelism(degree1)
 											   .withName("wf_pf_inc_nic")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe17(generator, wf, consumer);
 		cout << "Run Test 17 WF(PF(PLQ(INC), WLQ(NIC))): number of threads " << pipe17.cardinality() << endl;
@@ -507,15 +487,15 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(pfINCINC).withParallelism(degree1)
 											   .withName("wf_pf_inc_inc")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe18(generator, wf, consumer);
 		cout << "Run Test 18 WF(PF(PLQ(INC), WLQ(INC))): number of threads " << pipe18.cardinality() << endl;
@@ -532,15 +512,15 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(wmNICNIC).withParallelism(degree1)
 											   .withName("wf_wm_nic_nic")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe19(generator, wf, consumer);
 		cout << "Run Test 19 WF(WM(MAP(NIC), REDUCE(NIC))): number of threads " << pipe19.cardinality() << endl;
@@ -557,15 +537,15 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(wmNICINC).withParallelism(degree1)
 											   .withName("wf_wm_nic_inc")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe20(generator, wf, consumer);
 		cout << "Run Test 20 WF(WM(MAP(NIC), REDUCE(INC))): number of threads " << pipe20.cardinality() << endl;
@@ -582,15 +562,15 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(wmINCNIC).withParallelism(degree1)
 											   .withName("wf_wm_inc_nic")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe21(generator, wf, consumer);
 		cout << "Run Test 21 WF(WM(MAP(INC), REDUCE(NIC))): number of threads " << pipe21.cardinality() << endl;
@@ -607,15 +587,15 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Win_Farm wf = WinFarm_Builder(wmINCINC).withParallelism(degree1)
 											   .withName("wf_wm_inc_inc")
 											   .withEmitters(emitter_degree)
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe22(generator, wf, consumer);
 		cout << "Run Test 22 WF(WM(MAP(INC), REDUCE(INC))): number of threads " << pipe22.cardinality() << endl;
@@ -632,14 +612,14 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICNIC = PaneFarm_Builder(plqFNIC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(pfNICNIC).withParallelism(degree1)
 											   .withName("kf_pf_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe23(generator, kf, consumer);
 		cout << "Run Test 23 KF(PF(PLQ(NIC), WLQ(NIC))): number of threads " << pipe23.cardinality() << endl;
@@ -656,14 +636,14 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfNICINC = PaneFarm_Builder(plqFNIC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(pfNICINC).withParallelism(degree1)
 											   .withName("kf_pf_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe24(generator, kf, consumer);
 		cout << "Run Test 24 KF(PF(PLQ(NIC), WLQ(INC))): number of threads " << pipe24.cardinality() << endl;
@@ -680,14 +660,14 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCNIC = PaneFarm_Builder(plqFINC, wlqFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(pfINCNIC).withParallelism(degree1)
 											   .withName("kf_pf_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe25(generator, kf, consumer);
 		cout << "Run Test 25 KF(PF(PLQ(INC), WLQ(NIC))): number of threads " << pipe25.cardinality() << endl;
@@ -704,14 +684,14 @@ int main(int argc, char *argv[])
 	{
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindow(win_len, win_slide)
+		Pane_Farm pfINCINC = PaneFarm_Builder(plqFINC, wlqFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("pf_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(pfINCINC).withParallelism(degree1)
 											   .withName("kf_pf_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe26(generator, kf, consumer);
 		cout << "Run Test 26 KF(PF(PLQ(INC), WLQ(INC))): number of threads " << pipe26.cardinality() << endl;
@@ -729,14 +709,14 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICNIC = WinMapReduce_Builder(wmFNIC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(wmNICNIC).withParallelism(degree1)
 											   .withName("kf_wm_nic_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe27(generator, kf, consumer);
 		cout << "Run Test 27 KF(WM(MAP(NIC), REDUCE(NIC))): number of threads " << pipe27.cardinality() << endl;
@@ -753,14 +733,14 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmNICINC = WinMapReduce_Builder(wmFNIC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(wmNICINC).withParallelism(degree1)
 											   .withName("kf_wm_nic_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe28(generator, kf, consumer);
 		cout << "Run Test 28 KF(WM(MAP(NIC), REDUCE(INC))): number of threads " << pipe28.cardinality() << endl;
@@ -777,14 +757,14 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCNIC = WinMapReduce_Builder(wmFINC, wmFNIC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(wmINCNIC).withParallelism(degree1)
 											   .withName("kf_wm_inc_nic")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe29(generator, kf, consumer);
 		cout << "Run Test 29 KF(WM(MAP(INC), REDUCE(NIC))): number of threads " << pipe29.cardinality() << endl;
@@ -801,14 +781,14 @@ int main(int argc, char *argv[])
 	if (degree2 > 1) {
 		Generator generator(stream_len, num_keys);
 		Consumer consumer(num_keys);
-		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindow(win_len, win_slide)
+		Win_MapReduce wmINCINC = WinMapReduce_Builder(wmFINC, wmFINC).withCBWindows(win_len, win_slide)
 											   .withParallelism(degree2, degree3)
 											   .withName("wm_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		Key_Farm kf = KeyFarm_Builder(wmINCINC).withParallelism(degree1)
 											   .withName("kf_wm_inc_inc")
-											   .withOpt(opt_level)
+											   .withOptLevel(opt_level)
 											   .build();
 		ff_Pipe<tuple_t, output_t> pipe30(generator, kf, consumer);
 		cout << "Run Test 30 KF(WM(MAP(INC), REDUCE(INC))): number of threads " << pipe30.cardinality() << endl;

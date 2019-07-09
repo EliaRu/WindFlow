@@ -23,24 +23,16 @@
  *  
  *  @section Builders (Description)
  *  
- *  Set of builders based on method chaining to facilitate the creation of
- *  the WindFlow patterns.
+ *  Set of builders to facilitate the creation of the WindFlow patterns.
  */ 
 
 #ifndef BUILDERS_H
 #define BUILDERS_H
 
-// includes
-#include <tuple>
+/// includes
 #include <chrono>
 #include <memory>
 #include <functional>
-#if __cplusplus < 201703L //not C++17
-    #include <experimental/optional>
-    using namespace std::experimental;
-#else
-    #include <optional>
-#endif
 #include <basic.hpp>
 #include <meta_utils.hpp>
 
@@ -60,8 +52,11 @@ private:
     F_t func;
     // type of the pattern to be created by this builder
     using source_t = Source<decltype(get_tuple_t(func))>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
     uint64_t pardegree = 1;
     string name = "anonymous_source";
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
 public:
     /** 
@@ -84,14 +79,26 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Source pattern
+     *  \brief Method to specify the parallelism of the Source pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of source replicas
      *  \return the object itself
      */ 
     Source_Builder<F_t>& withParallelism(size_t _pardegree)
     {
         pardegree = _pardegree;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    Source_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -103,7 +110,7 @@ public:
      */ 
     source_t build()
     {
-        return source_t(func, pardegree, name); // copy elision in C++17
+        return source_t(func, pardegree, name, closing_func); // copy elision in C++17
     }
 #endif
 
@@ -114,7 +121,7 @@ public:
      */ 
     source_t *build_ptr()
     {
-        return new source_t(func, pardegree, name);
+        return new source_t(func, pardegree, name, closing_func);
     }
 
     /** 
@@ -124,7 +131,7 @@ public:
      */ 
     unique_ptr<source_t> build_unique()
     {
-        return make_unique<source_t>(func, pardegree, name);
+        return make_unique<source_t>(func, pardegree, name, closing_func);
     }
 };
 
@@ -142,12 +149,15 @@ private:
     F_t func;
     // type of the pattern to be created by this builder
     using filter_t = Filter<decltype(get_tuple_t(func))>;
-    // function type of the distribution function
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     uint64_t pardegree = 1;
     string name = "anonymous_filter";
     bool isKeyed = false;
-    f_routing_t routing_F;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
+    routing_func_t routing_func;
 
 public:
     /** 
@@ -170,9 +180,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Filter pattern
+     *  \brief Method to specify the parallelism of the Filter pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of filter replicas
      *  \return the object itself
      */ 
     Filter_Builder<F_t>& withParallelism(size_t _pardegree)
@@ -184,13 +194,25 @@ public:
     /** 
      *  \brief Method to enable the key-based routing
      *  
-     *  \param _routing_F function to perform the key-based distribution
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    Filter_Builder<F_t>& keyBy(f_routing_t _routing_F=[](size_t k, size_t n) { return k%n; })
+    Filter_Builder<F_t>& enable_KeyBy(routing_func_t _routing_func=[](size_t k, size_t n) { return k%n; })
     {
         isKeyed = true;
-        routing_F = _routing_F;
+        routing_func = _routing_func;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    Filter_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -203,9 +225,9 @@ public:
     filter_t build()
     {
         if (!isKeyed)
-            return filter_t(func, pardegree, name); // copy elision in C++17
+            return filter_t(func, pardegree, name, closing_func); // copy elision in C++17
         else
-            return filter_t(func, pardegree, name, routing_F); // copy elision in C++17
+            return filter_t(func, pardegree, name, closing_func, routing_func); // copy elision in C++17
     }
 #endif
 
@@ -217,9 +239,9 @@ public:
     filter_t *build_ptr()
     {
         if (!isKeyed)
-            return new filter_t(func, pardegree, name);
+            return new filter_t(func, pardegree, name, closing_func);
         else
-            return new filter_t(func, pardegree, name, routing_F);
+            return new filter_t(func, pardegree, name, closing_func, routing_func);
     }
 
     /** 
@@ -230,9 +252,9 @@ public:
     unique_ptr<filter_t> build_unique()
     {
         if (!isKeyed)
-            return make_unique<filter_t>(func, pardegree, name);
+            return make_unique<filter_t>(func, pardegree, name, closing_func);
         else
-            return make_unique<filter_t>(func, pardegree, name, routing_F);
+            return make_unique<filter_t>(func, pardegree, name, closing_func, routing_func);
     }
 };
 
@@ -251,12 +273,15 @@ private:
     // type of the pattern to be created by this builder
     using map_t = Map<decltype(get_tuple_t(func)),
                              decltype(get_result_t(func))>;
-    // function type of the distribution function
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     uint64_t pardegree = 1;
     string name = "anonymous_map";
     bool isKeyed = false;
-    f_routing_t routing_F;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
+    routing_func_t routing_func;
 
 public:
     /** 
@@ -279,9 +304,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Map pattern
+     *  \brief Method to specify the parallelism of the Map pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of map replicas
      *  \return the object itself
      */ 
     Map_Builder<F_t>& withParallelism(size_t _pardegree)
@@ -293,13 +318,25 @@ public:
     /** 
      *  \brief Method to enable the key-based routing
      *  
-     *  \param _routing_F function to perform the key-based distribution
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    Map_Builder<F_t>& keyBy(f_routing_t _routing_F=[](size_t k, size_t n) { return k%n; })
+    Map_Builder<F_t>& enable_KeyBy(routing_func_t _routing_func=[](size_t k, size_t n) { return k%n; })
     {
         isKeyed = true;
-        routing_F = _routing_F;
+        routing_func = _routing_func;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    Map_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -312,9 +349,9 @@ public:
     map_t build()
     {
         if (!isKeyed)
-            return map_t(func, pardegree, name); // copy elision in C++17
+            return map_t(func, pardegree, name, closing_func); // copy elision in C++17
         else
-            return map_t(func, pardegree, name, routing_F); // copy elision in C++17
+            return map_t(func, pardegree, name, closing_func, routing_func); // copy elision in C++17
     }
 #endif
 
@@ -326,9 +363,9 @@ public:
     map_t *build_ptr()
     {
         if (!isKeyed)
-            return new map_t(func, pardegree, name);
+            return new map_t(func, pardegree, name, closing_func);
         else
-            return new map_t(func, pardegree, name, routing_F);
+            return new map_t(func, pardegree, name, closing_func, routing_func);
     }
 
     /** 
@@ -339,9 +376,9 @@ public:
     unique_ptr<map_t> build_unique()
     {
         if (!isKeyed)
-            return make_unique<map_t>(func, pardegree, name);
+            return make_unique<map_t>(func, pardegree, name, closing_func);
         else
-            return make_unique<map_t>(func, pardegree, name, routing_F);
+            return make_unique<map_t>(func, pardegree, name, closing_func, routing_func);
     }
 };
 
@@ -360,12 +397,15 @@ private:
     // type of the pattern to be created by this builder
     using flatmap_t = FlatMap<decltype(get_tuple_t(func)),
                              decltype(get_result_t(func))>;
-    // function type of the distribution function
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     uint64_t pardegree = 1;
     string name = "anonymous_flatmap";
     bool isKeyed = false;
-    f_routing_t routing_F;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
+    routing_func_t routing_func;
 
 public:
     /** 
@@ -388,9 +428,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the FlatMap pattern
+     *  \brief Method to specify the parallelism of the FlatMap pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of flatmap replicas
      *  \return the object itself
      */ 
     FlatMap_Builder<F_t>& withParallelism(size_t _pardegree)
@@ -402,13 +442,25 @@ public:
     /** 
      *  \brief Method to enable the key-based routing
      *  
-     *  \param _routing_F function to perform the key-based distribution
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    FlatMap_Builder<F_t>& keyBy(f_routing_t _routing_F=[](size_t k, size_t n) { return k%n; })
+    FlatMap_Builder<F_t>& enable_KeyBy(routing_func_t _routing_func=[](size_t k, size_t n) { return k%n; })
     {
         isKeyed = true;
-        routing_F = _routing_F;
+        routing_func = _routing_func;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    FlatMap_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -421,9 +473,9 @@ public:
     flatmap_t build()
     {
         if (!isKeyed)
-            return flatmap_t(func, pardegree, name); // copy elision in C++17
+            return flatmap_t(func, pardegree, name, closing_func); // copy elision in C++17
         else
-            return flatmap_t(func, pardegree, name, routing_F); // copy elision in C++17
+            return flatmap_t(func, pardegree, name, closing_func, routing_func); // copy elision in C++17
     }
 #endif
 
@@ -435,9 +487,9 @@ public:
     flatmap_t *build_ptr()
     {
         if (!isKeyed)
-            return new flatmap_t(func, pardegree, name);
+            return new flatmap_t(func, pardegree, name, closing_func);
         else
-            return new flatmap_t(func, pardegree, name, routing_F);
+            return new flatmap_t(func, pardegree, name, closing_func, routing_func);
     }
 
     /** 
@@ -448,9 +500,9 @@ public:
     unique_ptr<flatmap_t> build_unique()
     {
         if (!isKeyed)
-            return make_unique<flatmap_t>(func, pardegree, name);
+            return make_unique<flatmap_t>(func, pardegree, name, closing_func);
         else
-            return make_unique<flatmap_t>(func, pardegree, name, routing_F);
+            return make_unique<flatmap_t>(func, pardegree, name, closing_func, routing_func);
     }
 };
 
@@ -468,14 +520,17 @@ private:
     F_t func;
     // type of the pattern to be created by this builder
     using accumulator_t = Accumulator<decltype(get_tuple_t(func)), decltype(get_result_t(func))>;
-    // type of the routing function
-    using f_routing_t = function<size_t(size_t, size_t)>;
-    // type of the result produced by the Accumulator instance
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
+    // type of the result produced by the Accumulator
     using result_t = decltype(get_result_t(func));
     uint64_t pardegree = 1;
     string name = "anonymous_accumulator";
     result_t init_value;
-    f_routing_t routing_F = [](size_t k, size_t n) { return k%n; };
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
+    routing_func_t routing_func = [](size_t k, size_t n) { return k%n; };
 
 public:
     /** 
@@ -500,7 +555,7 @@ public:
     /** 
      *  \brief Method to specify the initial value for fold functions
      *         (for reduce the initial value is the one obtained by the
-     *          default constructor of result_t)
+     *          default Constructor of result_t)
      *  
      *  \param _init_value initial value
      *  \return the object itself
@@ -512,9 +567,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Accumulator pattern
+     *  \brief Method to specify the parallelism of the Accumulator pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of accumulator replicas
      *  \return the object itself
      */ 
     Accumulator_Builder<F_t>& withParallelism(size_t _pardegree)
@@ -526,12 +581,24 @@ public:
     /** 
      *  \brief Method to specify the routing function of input tuples to the internal patterns
      *  
-     *  \param _routing_F routing function to be used
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    Accumulator_Builder<F_t>& withRouting(f_routing_t _routing_F)
+    Accumulator_Builder<F_t>& set_KeyBy(routing_func_t _routing_func)
     {
-        routing_F = _routing_F;
+        routing_func = _routing_func;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    Accumulator_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -543,7 +610,7 @@ public:
      */ 
     accumulator_t build()
     {
-        return accumulator_t(func, init_value, pardegree, name, routing_F); // copy elision in C++17
+        return accumulator_t(func, init_value, pardegree, name, closing_func, routing_func); // copy elision in C++17
     }
 #endif
 
@@ -554,7 +621,7 @@ public:
      */ 
     accumulator_t *build_ptr()
     {
-        return new accumulator_t(func, init_value, pardegree, name, routing_F);
+        return new accumulator_t(func, init_value, pardegree, name, closing_func, routing_func);
     }
 
     /** 
@@ -564,7 +631,7 @@ public:
      */ 
     unique_ptr<accumulator_t> build_unique()
     {
-        return make_unique<accumulator_t>(func, init_value, pardegree, name, routing_F);
+        return make_unique<accumulator_t>(func, init_value, pardegree, name, closing_func, routing_func);
     }
 };
 
@@ -583,13 +650,16 @@ private:
     // type of the pattern to be created by this builder
     using winseq_t = Win_Seq<decltype(get_tuple_t(func)),
                              decltype(get_result_t(func))>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
     uint64_t win_len = 1;
     uint64_t slide_len = 1;
     win_type_t winType = CB;
     string name = "anonymous_seq";
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
 public:
-	/** 
+    /** 
      *  \brief Constructor
      *  
      *  \param _func non-incremental/incremental function
@@ -603,7 +673,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinSeq_Builder<F_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinSeq_Builder<F_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -618,7 +688,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinSeq_Builder<F_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinSeq_Builder<F_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -638,6 +708,18 @@ public:
         return *this;
     }
 
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    WinSeq_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
+        return *this;
+    }
+
 #if __cplusplus >= 201703L
     /** 
      *  \brief Method to create the Win_Seq pattern (only C++17)
@@ -646,7 +728,7 @@ public:
      */ 
     winseq_t build()
     {
-        return winseq_t(func, win_len, slide_len, winType, name); // copy elision in C++17
+        return winseq_t(func, win_len, slide_len, winType, name, closing_func, RuntimeContext(1, 0), PatternConfig(0, 1, slide_len, 0, 1, slide_len), SEQ); // copy elision in C++17
     }
 #endif
 
@@ -657,7 +739,7 @@ public:
      */ 
     winseq_t *build_ptr()
     {
-        return new winseq_t(func, win_len, slide_len, winType, name);
+        return new winseq_t(func, win_len, slide_len, winType, name, closing_func, RuntimeContext(1, 0), PatternConfig(0, 1, slide_len, 0, 1, slide_len), SEQ);
     }
 
     /** 
@@ -667,7 +749,7 @@ public:
      */ 
     unique_ptr<winseq_t> build_unique()
     {
-        return make_unique<winseq_t>(func, win_len, slide_len, winType, name);
+        return make_unique<winseq_t>(func, win_len, slide_len, winType, name, closing_func, RuntimeContext(1, 0), PatternConfig(0, 1, slide_len, 0, 1, slide_len), SEQ);
     }
 };
 
@@ -710,7 +792,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinSeqGPU_Builder<F_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinSeqGPU_Builder<F_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -725,7 +807,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinSeqGPU_Builder<F_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinSeqGPU_Builder<F_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -806,6 +888,8 @@ private:
     T input;
     // type of the pattern to be created by this builder
     using winfarm_t = decltype(get_WF_nested_type(input));
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
     uint64_t win_len = 1;
     uint64_t slide_len = 1;
     win_type_t winType = CB;
@@ -813,9 +897,10 @@ private:
     size_t pardegree = 1;
     string name = "anonymous_wf";
     bool ordered = true;
-    opt_level_t opt_level = LEVEL0;
+    opt_level_t opt_level = LEVEL2;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
-    // window parameters initialization (input is a Pane_Farm instance)
+    // window parameters initialization (input is a Pane_Farm)
     template<typename ...Args>
     void initWindowConf(Pane_Farm<Args...> _pf)
     {
@@ -824,7 +909,7 @@ private:
         winType = _pf.winType;
     }
 
-    // window parameters initialization (input is a Win_MapReduce instance)
+    // window parameters initialization (input is a Win_MapReduce)
     template<typename ...Args>
     void initWindowConf(Win_MapReduce<Args...> _wm)
     {
@@ -860,7 +945,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinFarm_Builder<T>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinFarm_Builder<T>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -875,7 +960,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinFarm_Builder<T>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinFarm_Builder<T>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -896,9 +981,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Win_Farm pattern
+     *  \brief Method to specify the parallelism of the Win_Farm pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of replicas
      *  \return the object itself
      */ 
     WinFarm_Builder<T>& withParallelism(size_t _pardegree)
@@ -925,7 +1010,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    WinFarm_Builder<T>& withOrdered(bool _ordered)
+    WinFarm_Builder<T>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -937,9 +1022,23 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    WinFarm_Builder<T>& withOpt(opt_level_t _opt_level)
+    WinFarm_Builder<T>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *         This method does not have any effect in case the Win_Farm
+     *         replicates complex patterns (i.e. Pane_Farm and Win_MapReduce).
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    WinFarm_Builder<T>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -951,7 +1050,7 @@ public:
      */ 
     winfarm_t build()
     {
-        return winfarm_t(input, win_len, slide_len, winType, emitter_degree, pardegree, name, ordered, opt_level); // copy elision in C++17
+        return winfarm_t(input, win_len, slide_len, winType, emitter_degree, pardegree, name, closing_func, ordered, opt_level); // copy elision in C++17
     }
 #endif
 
@@ -962,7 +1061,7 @@ public:
      */ 
     winfarm_t *build_ptr()
     {
-        return new winfarm_t(input, win_len, slide_len, winType, emitter_degree, pardegree, name, ordered, opt_level);
+        return new winfarm_t(input, win_len, slide_len, winType, emitter_degree, pardegree, name, closing_func, ordered, opt_level);
     }
 
     /** 
@@ -972,7 +1071,7 @@ public:
      */ 
     unique_ptr<winfarm_t> build_unique()
     {
-        return make_unique<winfarm_t>(input, win_len, slide_len, winType, emitter_degree, pardegree, name, ordered, opt_level);
+        return make_unique<winfarm_t>(input, win_len, slide_len, winType, emitter_degree, pardegree, name, closing_func, ordered, opt_level);
     }
 };
 
@@ -1000,9 +1099,9 @@ private:
     string name = "anonymous_wf_gpu";
     size_t scratchpad_size = 0;
     bool ordered = true;
-    opt_level_t opt_level = LEVEL0;
+    opt_level_t opt_level = LEVEL2;
 
-    // window parameters initialization (input is a Pane_Farm_GPU instance)
+    // window parameters initialization (input is a Pane_Farm_GPU)
     template<typename ...Args>
     void initWindowConf(Pane_Farm_GPU<Args...> _pf)
     {
@@ -1013,7 +1112,7 @@ private:
         n_thread_block = _pf.n_thread_block;
     }
 
-    // window parameters initialization (input is a Win_MapReduce_GPU instance)
+    // window parameters initialization (input is a Win_MapReduce_GPU)
     template<typename ...Args>
     void initWindowConf(Win_MapReduce_GPU<Args...> _wm)
     {
@@ -1052,7 +1151,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinFarmGPU_Builder<T>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinFarmGPU_Builder<T>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1067,7 +1166,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinFarmGPU_Builder<T>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinFarmGPU_Builder<T>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1088,9 +1187,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Win_Farm_GPU pattern
+     *  \brief Method to specify the parallelism of the Win_Farm_GPU pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of replicas
      *  \return the object itself
      */ 
     WinFarmGPU_Builder<T>& withParallelism(size_t _pardegree)
@@ -1143,7 +1242,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    WinFarmGPU_Builder<T>& withOrdered(bool _ordered)
+    WinFarmGPU_Builder<T>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -1155,7 +1254,7 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    WinFarmGPU_Builder<T>& withOpt(opt_level_t _opt_level)
+    WinFarmGPU_Builder<T>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
         return *this;
@@ -1196,17 +1295,20 @@ private:
     T input;
     // type of the pattern to be created by this builder
     using keyfarm_t = decltype(get_KF_nested_type(input));
-    // type of the routing function
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     uint64_t win_len = 1;
     uint64_t slide_len = 1;
     win_type_t winType = CB;
     size_t pardegree = 1;
     string name = "anonymous_kf";
-    f_routing_t routing_F = [](size_t k, size_t n) { return k%n; };
-    opt_level_t opt_level = LEVEL0;
+    routing_func_t routing_func = [](size_t k, size_t n) { return k%n; };
+    opt_level_t opt_level = LEVEL2;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
-    // window parameters initialization (input is a Pane_Farm instance)
+    // window parameters initialization (input is a Pane_Farm)
     template<typename ...Args>
     void initWindowConf(Pane_Farm<Args...> _pf)
     {
@@ -1215,7 +1317,7 @@ private:
         winType = _pf.winType;
     }
 
-    // window parameters initialization (input is a Win_MapReduce instance)
+    // window parameters initialization (input is a Win_MapReduce)
     template<typename ...Args>
     void initWindowConf(Win_MapReduce<Args...> _wm)
     {
@@ -1251,7 +1353,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    KeyFarm_Builder<T>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    KeyFarm_Builder<T>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1266,7 +1368,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    KeyFarm_Builder<T>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    KeyFarm_Builder<T>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1275,9 +1377,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Key_Farm pattern
+     *  \brief Method to specify the parallelism of the Key_Farm pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of replicas
      *  \return the object itself
      */ 
     KeyFarm_Builder<T>& withParallelism(size_t _pardegree)
@@ -1301,12 +1403,12 @@ public:
     /** 
      *  \brief Method to specify the routing function of input tuples to the internal patterns
      *  
-     *  \param _routing_F routing function to be used
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    KeyFarm_Builder<T>& withRouting(f_routing_t _routing_F)
+    KeyFarm_Builder<T>& set_KeyBy(routing_func_t _routing_func)
     {
-        routing_F = _routing_F;
+        routing_func = _routing_func;
         return *this;
     }
 
@@ -1316,9 +1418,21 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    KeyFarm_Builder<T>& withOpt(opt_level_t _opt_level)
+    KeyFarm_Builder<T>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    KeyFarm_Builder<T>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -1330,7 +1444,7 @@ public:
      */ 
     keyfarm_t build()
     {
-        return keyfarm_t(input, win_len, slide_len, winType, pardegree, name, routing_F, opt_level); // copy elision in C++17
+        return keyfarm_t(input, win_len, slide_len, winType, pardegree, name, closing_func, routing_func, opt_level); // copy elision in C++17
     }
 #endif
 
@@ -1341,7 +1455,7 @@ public:
      */ 
     keyfarm_t *build_ptr()
     {
-        return new keyfarm_t(input, win_len, slide_len, winType, pardegree, name, routing_F, opt_level);
+        return new keyfarm_t(input, win_len, slide_len, winType, pardegree, name, closing_func, routing_func, opt_level);
     }
 
     /** 
@@ -1351,7 +1465,7 @@ public:
      */ 
     unique_ptr<keyfarm_t> build_unique()
     {
-        return make_unique<keyfarm_t>(input, win_len, slide_len, winType, pardegree, name, routing_F, opt_level);
+        return make_unique<keyfarm_t>(input, win_len, slide_len, winType, pardegree, name, closing_func, routing_func, opt_level);
     }
 };
 
@@ -1367,8 +1481,8 @@ class KeyFarmGPU_Builder
 {
 private:
     T input;
-    // type of the routing function
-    using f_routing_t = function<size_t(size_t, size_t)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     // type of the pattern to be created by this builder
     using keyfarm_gpu_t = decltype(get_KF_GPU_nested_type(input));
     uint64_t win_len = 1;
@@ -1379,10 +1493,10 @@ private:
     size_t n_thread_block = DEFAULT_CUDA_NUM_THREAD_BLOCK;
     string name = "anonymous_wf_gpu";
     size_t scratchpad_size = 0;
-    f_routing_t routing_F = [](size_t k, size_t n) { return k%n; };
-    opt_level_t opt_level = LEVEL0;
+    routing_func_t routing_func = [](size_t k, size_t n) { return k%n; };
+    opt_level_t opt_level = LEVEL2;
 
-    // window parameters initialization (input is a Pane_Farm_GPU instance)
+    // window parameters initialization (input is a Pane_Farm_GPU)
     template<typename ...Args>
     void initWindowConf(Pane_Farm_GPU<Args...> _pf)
     {
@@ -1393,7 +1507,7 @@ private:
         n_thread_block = _pf.n_thread_block;
     }
 
-    // window parameters initialization (input is a Win_MapReduce_GPU instance)
+    // window parameters initialization (input is a Win_MapReduce_GPU)
     template<typename ...Args>
     void initWindowConf(Win_MapReduce_GPU<Args...> _wm)
     {
@@ -1432,7 +1546,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    KeyFarmGPU_Builder<T>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    KeyFarmGPU_Builder<T>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1447,7 +1561,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    KeyFarmGPU_Builder<T>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    KeyFarmGPU_Builder<T>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1456,9 +1570,9 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Key_Farm_GPU pattern
+     *  \brief Method to specify the parallelism of the Key_Farm_GPU pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of replicas
      *  \return the object itself
      */ 
     KeyFarmGPU_Builder<T>& withParallelism(size_t _pardegree)
@@ -1508,12 +1622,12 @@ public:
     /** 
      *  \brief Method to specify the routing function of input tuples to the internal patterns
      *  
-     *  \param _routing_F routing function to be used
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
      *  \return the object itself
      */ 
-    KeyFarmGPU_Builder<T>& withRouting(f_routing_t _routing_F)
+    KeyFarmGPU_Builder<T>& set_KeyBy(routing_func_t _routing_func)
     {
-        routing_F = _routing_F;
+        routing_func = _routing_func;
         return *this;
     }
 
@@ -1523,7 +1637,7 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    KeyFarmGPU_Builder<T>& withOpt(opt_level_t _opt_level)
+    KeyFarmGPU_Builder<T>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
         return *this;
@@ -1536,7 +1650,7 @@ public:
      */ 
     keyfarm_gpu_t *build_ptr()
     {
-        return new keyfarm_gpu_t(input, win_len, slide_len, winType, pardegree, batch_len, n_thread_block, name, scratchpad_size, routing_F, opt_level);
+        return new keyfarm_gpu_t(input, win_len, slide_len, winType, pardegree, batch_len, n_thread_block, name, scratchpad_size, routing_func, opt_level);
     }
 
     /** 
@@ -1546,7 +1660,7 @@ public:
      */ 
     unique_ptr<keyfarm_gpu_t> build_unique()
     {
-        return make_unique<keyfarm_gpu_t>(input, win_len, slide_len, winType, pardegree, batch_len, n_thread_block, name, scratchpad_size, routing_F, opt_level);
+        return make_unique<keyfarm_gpu_t>(input, win_len, slide_len, winType, pardegree, batch_len, n_thread_block, name, scratchpad_size, routing_func, opt_level);
     }
 };
 
@@ -1565,6 +1679,8 @@ private:
     G_t func_G;
     using panefarm_t = Pane_Farm<decltype(get_tuple_t(func_F)),
                                  decltype(get_result_t(func_F))>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
     uint64_t win_len = 1;
     uint64_t slide_len = 1;
     win_type_t winType = CB;
@@ -1573,6 +1689,7 @@ private:
     string name = "anonymous_pf";
     bool ordered = true;
     opt_level_t opt_level = LEVEL0;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
 public:
     /** 
@@ -1590,7 +1707,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    PaneFarm_Builder<F_t, G_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    PaneFarm_Builder<F_t, G_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1605,7 +1722,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    PaneFarm_Builder<F_t, G_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    PaneFarm_Builder<F_t, G_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1614,10 +1731,10 @@ public:
     }
 
     /** 
-     *  \brief Method to specify parallel configuration within the Pane_Farm pattern
+     *  \brief Method to specify the parallelism configuration within the Pane_Farm pattern
      *  
-     *  \param _plq_degree number of Win_Seq instances in the PLQ stage
-     *  \param _wlq_degree number of Win_Seq instances in the WLQ stage
+     *  \param _plq_degree number replicas in the PLQ stage
+     *  \param _wlq_degree number replicas in the WLQ stage
      *  \return the object itself
      */ 
     PaneFarm_Builder<F_t, G_t>& withParallelism(size_t _plq_degree, size_t _wlq_degree)
@@ -1645,7 +1762,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    PaneFarm_Builder<F_t, G_t>& withOrdered(bool _ordered)
+    PaneFarm_Builder<F_t, G_t>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -1657,9 +1774,21 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    PaneFarm_Builder<F_t, G_t>& withOpt(opt_level_t _opt_level)
+    PaneFarm_Builder<F_t, G_t>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    PaneFarm_Builder<F_t, G_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -1671,7 +1800,7 @@ public:
      */ 
     panefarm_t build()
     {
-        return panefarm_t(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, ordered, opt_level); // copy elision in C++17
+        return panefarm_t(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, closing_func, ordered, opt_level); // copy elision in C++17
     }
 #endif
 
@@ -1682,7 +1811,7 @@ public:
      */ 
     panefarm_t *build_ptr()
     {
-        return new panefarm_t(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, ordered, opt_level);
+        return new panefarm_t(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, closing_func, ordered, opt_level);
     }
 
     /** 
@@ -1692,7 +1821,7 @@ public:
      */ 
     unique_ptr<panefarm_t> build_unique()
     {
-        return make_unique<panefarm_t>(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, ordered, opt_level);
+        return make_unique<panefarm_t>(func_F, func_G, win_len, slide_len, winType, plq_degree, wlq_degree, name, closing_func, ordered, opt_level);
     }
 };
 
@@ -1742,7 +1871,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    PaneFarmGPU_Builder<F_t, G_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    PaneFarmGPU_Builder<F_t, G_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1757,7 +1886,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    PaneFarmGPU_Builder<F_t, G_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    PaneFarmGPU_Builder<F_t, G_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1766,10 +1895,10 @@ public:
     }
 
     /** 
-     *  \brief Method to specify parallel configuration within the Pane_Farm_GPU pattern
+     *  \brief Method to specify the parallelism configuration within the Pane_Farm_GPU pattern
      *  
-     *  \param _plq_degree number of Win_Seq_GPU instances in the PLQ stage
-     *  \param _wlq_degree number of Win_Seq_GPU instances in the WLQ stage
+     *  \param _plq_degree number of replicas in the PLQ stage
+     *  \param _wlq_degree number of replicas in the WLQ stage
      *  \return the object itself
      */ 
     PaneFarmGPU_Builder<F_t, G_t>& withParallelism(size_t _plq_degree, size_t _wlq_degree)
@@ -1823,7 +1952,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    PaneFarmGPU_Builder<F_t, G_t>& withOrdered(bool _ordered)
+    PaneFarmGPU_Builder<F_t, G_t>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -1835,7 +1964,7 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    PaneFarmGPU_Builder<F_t, G_t>& withOpt(opt_level_t _opt_level)
+    PaneFarmGPU_Builder<F_t, G_t>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
         return *this;
@@ -1878,6 +2007,8 @@ private:
     // type of the pattern to be created by this builder
     using winmapreduce_t = Win_MapReduce<decltype(get_tuple_t(func_F)),
                                          decltype(get_result_t(func_F))>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
     uint64_t win_len = 1;
     uint64_t slide_len = 1;
     win_type_t winType = CB;
@@ -1886,6 +2017,7 @@ private:
     string name = "anonymous_wmr";
     bool ordered = true;
     opt_level_t opt_level = LEVEL0;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
 
 public:
     /** 
@@ -1903,7 +2035,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinMapReduce_Builder<F_t, G_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinMapReduce_Builder<F_t, G_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -1918,7 +2050,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinMapReduce_Builder<F_t, G_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinMapReduce_Builder<F_t, G_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -1927,10 +2059,10 @@ public:
     }
 
     /** 
-     *  \brief Method to specify parallel configuration within the Win_MapReduce pattern
+     *  \brief Method to specify the parallelism configuration within the Win_MapReduce pattern
      *  
-     *  \param _map_degree number of Win_Seq instances in the MAP stage
-     *  \param _reduce_degree number of Win_Seq instances in the REDUCE stage
+     *  \param _map_degree number of replicas in the MAP stage
+     *  \param _reduce_degree number of replicas in the REDUCE stage
      *  \return the object itself
      */ 
     WinMapReduce_Builder<F_t, G_t>& withParallelism(size_t _map_degree, size_t _reduce_degree)
@@ -1958,7 +2090,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    WinMapReduce_Builder<F_t, G_t>& withOrdered(bool _ordered)
+    WinMapReduce_Builder<F_t, G_t>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -1970,9 +2102,21 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    WinMapReduce_Builder<F_t, G_t>& withOpt(opt_level_t _opt_level)
+    WinMapReduce_Builder<F_t, G_t>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    WinMapReduce_Builder<F_t, G_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -1984,7 +2128,7 @@ public:
      */ 
     winmapreduce_t build()
     {
-        return winmapreduce_t(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, ordered, opt_level); // copy elision in C++17
+        return winmapreduce_t(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, closing_func, ordered, opt_level); // copy elision in C++17
     }
 #endif
 
@@ -1995,7 +2139,7 @@ public:
      */ 
     winmapreduce_t *build_ptr()
     {
-        return new winmapreduce_t(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, ordered, opt_level);
+        return new winmapreduce_t(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, closing_func, ordered, opt_level);
     }
 
     /** 
@@ -2005,7 +2149,7 @@ public:
      */ 
     unique_ptr<winmapreduce_t> build_unique()
     {
-        return make_unique<winmapreduce_t>(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, ordered, opt_level);
+        return make_unique<winmapreduce_t>(func_F, func_G, win_len, slide_len, winType, map_degree, reduce_degree, name, closing_func, ordered, opt_level);
     }
 };
 
@@ -2055,7 +2199,7 @@ public:
      *  \param _slide_len slide length (in no. of tuples)
      *  \return the object itself
      */ 
-    WinMapReduceGPU_Builder<F_t, G_t>& withCBWindow(uint64_t _win_len, uint64_t _slide_len)
+    WinMapReduceGPU_Builder<F_t, G_t>& withCBWindows(uint64_t _win_len, uint64_t _slide_len)
     {
         win_len = _win_len;
         slide_len = _slide_len;
@@ -2070,7 +2214,7 @@ public:
      *  \param _slide_len slide length (in microseconds)
      *  \return the object itself
      */ 
-    WinMapReduceGPU_Builder<F_t, G_t>& withTBWindow(microseconds _win_len, microseconds _slide_len)
+    WinMapReduceGPU_Builder<F_t, G_t>& withTBWindows(microseconds _win_len, microseconds _slide_len)
     {
         win_len = _win_len.count();
         slide_len = _slide_len.count();
@@ -2079,10 +2223,10 @@ public:
     }
 
     /** 
-     *  \brief Method to specify parallel configuration within the Win_MapReduce_GPU pattern
+     *  \brief Method to specify the parallelism configuration within the Win_MapReduce_GPU pattern
      *  
-     *  \param _map_degree number of Win_Seq_GPU instances in the MAP stage
-     *  \param _reduce_degree number of Win_Seq_GPU instances in the REDUCE stage
+     *  \param _map_degree number of replicas in the MAP stage
+     *  \param _reduce_degree number of replicas in the REDUCE stage
      *  \return the object itself
      */ 
     WinMapReduceGPU_Builder<F_t, G_t>& withParallelism(size_t _map_degree, size_t _reduce_degree)
@@ -2136,7 +2280,7 @@ public:
      *  \param _ordered boolean flag (true for total key-based ordering, false no ordering is provided)
      *  \return the object itself
      */ 
-    WinMapReduceGPU_Builder<F_t, G_t>& withOrdered(bool _ordered)
+    WinMapReduceGPU_Builder<F_t, G_t>& withOrdering(bool _ordered)
     {
         ordered = _ordered;
         return *this;
@@ -2148,7 +2292,7 @@ public:
      *  \param _opt_level (optimization level)
      *  \return the object itself
      */ 
-    WinMapReduceGPU_Builder<F_t, G_t>& withOpt(opt_level_t _opt_level)
+    WinMapReduceGPU_Builder<F_t, G_t>& withOptLevel(opt_level_t _opt_level)
     {
         opt_level = _opt_level;
         return *this;
@@ -2189,8 +2333,15 @@ private:
     F_t func;
     // type of the pattern to be created by this builder
     using sink_t = Sink<decltype(get_tuple_t(func))>;
+    // type of the closing function
+    using closing_func_t = function<void(RuntimeContext&)>;
+    // type of the function to map the key hashcode onto an identifier starting from zero to pardegree-1
+    using routing_func_t = function<size_t(size_t, size_t)>;
     uint64_t pardegree = 1;
     string name = "anonymous_sink";
+    bool isKeyed = false;
+    closing_func_t closing_func = [](RuntimeContext &r) -> void { return; };
+    routing_func_t routing_func;
 
 public:
     /** 
@@ -2213,14 +2364,39 @@ public:
     }
 
     /** 
-     *  \brief Method to specify the number of parallel instances within the Sink pattern
+     *  \brief Method to specify the parallelism of the Sink pattern
      *  
-     *  \param _pardegree number of parallel instances
+     *  \param _pardegree number of sink replicas
      *  \return the object itself
      */ 
     Sink_Builder<F_t>& withParallelism(size_t _pardegree)
     {
         pardegree = _pardegree;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to enable the key-based routing
+     *  
+     *  \param _routing_func function to map the key hashcode onto an identifier starting from zero to pardegree-1
+     *  \return the object itself
+     */ 
+    Sink_Builder<F_t>& set_KeyBy(routing_func_t _routing_func=[](size_t k, size_t n) { return k%n; })
+    {
+        isKeyed = true;
+        routing_func = _routing_func;
+        return *this;
+    }
+
+    /** 
+     *  \brief Method to specify the closing function used by the pattern
+     *  
+     *  \param _closing_func closing function to be used by the pattern
+     *  \return the object itself
+     */ 
+    Sink_Builder<F_t>& withClosingFunction(closing_func_t _closing_func)
+    {
+        closing_func = _closing_func;
         return *this;
     }
 
@@ -2232,7 +2408,10 @@ public:
      */ 
     sink_t build()
     {
-        return sink_t(func, pardegree, name); // copy elision in C++17
+        if (!isKeyed)
+            return sink_t(func, pardegree, name, closing_func); // copy elision in C++17
+        else
+            return sink_t(func, pardegree, name, closing_func, routing_func); // copy elision in C++17
     }
 #endif
 
@@ -2243,7 +2422,10 @@ public:
      */ 
     sink_t *build_ptr()
     {
-        return new sink_t(func, pardegree, name);
+        if (!isKeyed)
+            return new sink_t(func, pardegree, name, closing_func);
+        else
+            return new sink_t(func, pardegree, name, closing_func, routing_func);
     }
 
     /** 
@@ -2253,7 +2435,10 @@ public:
      */ 
     unique_ptr<sink_t> build_unique()
     {
-        return make_unique<sink_t>(func, pardegree, name);
+        if (!isKeyed)
+            return make_unique<sink_t>(func, pardegree, name, closing_func);
+        else
+            return make_unique<sink_t>(func, pardegree, name, closing_func, routing_func);
     }
 };
 

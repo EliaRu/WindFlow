@@ -63,11 +63,8 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined window function (Incremental Query)
-	auto F = [](size_t key, size_t wid, const tuple_t &t, output_t &result) {
-		result.key = key;
-		result.id = wid;
+	auto F = [](size_t wid, const tuple_t &t, output_t &result) {
 		result.value += t.value;
-		return 0;
 	};
         auto L = [] (size_t key, uint64_t id, const tuple_t& t, output_t& res ) {
             res.key = key;

@@ -45,10 +45,10 @@ class StreamArchive
 {
 private:
     // function to compare two tuples
-    using f_compare_t = function<bool(const tuple_t &t1, const tuple_t &t2)>;
+    using compare_func_t = function<bool(const tuple_t &t1, const tuple_t &t2)>;
     // const iterator type
     using const_iterator_t = typename container_t::const_iterator;
-    f_compare_t lessThan; // function to compare two tuples
+    compare_func_t lessThan; // function to compare two tuples
     container_t archive; // container implementing the archive (elements are stored in increasing order)
 
 public:

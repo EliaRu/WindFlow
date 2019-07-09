@@ -73,21 +73,18 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined map and reduce functions (Incremental Query)
-	auto F = [](size_t key, size_t wid, const tuple_t &t, tuple_t &win_result) {
-		win_result.key = key;
-		win_result.id = wid;
+	auto F = [](size_t wid, const tuple_t &t, tuple_t &win_result) {
 		win_result.value += t.value;
-		return 0;
 	};
 	// creation of the Win_MapReduce and Key_Farm patterns
-	Win_MapReduce wm = WinMapReduce_Builder(F, F).withCBWindow(win_len, win_slide)
+	Win_MapReduce wm = WinMapReduce_Builder(F, F).withCBWindows(win_len, win_slide)
 									.withParallelism(map_degree, reduce_degree)
 									.withName("test_sum")
-									.withOpt(LEVEL)
+									.withOptLevel(LEVEL)
 									.build();
 	Key_Farm kf = KeyFarm_Builder(wm).withParallelism(kf_degree)
 									.withName("test_sum")
-									.withOpt(LEVEL)
+									.withOptLevel(LEVEL)
 									.build();
 	// creation of the pipeline
 	Generator generator(stream_len, num_keys);

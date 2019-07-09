@@ -66,17 +66,14 @@ int main(int argc, char *argv[])
         }
     }
 	// user-defined window function (Incremental Query)
-	auto F = [](size_t key, size_t wid, const tuple_t &t, output_t &result) {
-		result.key = key;
-		result.id = wid;
+	auto F = [](size_t wid, const tuple_t &t, output_t &result) {
 		result.value += t.value;
-		return 0;
 	};
 	// creation of the Key_Farm pattern	
-	Key_Farm kf = KeyFarm_Builder(F).withCBWindow(win_len, win_slide)
+	Key_Farm kf = KeyFarm_Builder(F).withCBWindows(win_len, win_slide)
 									.withParallelism(pardegree)
 									.withName("test_sum")
-									.withOpt(LEVEL)
+									.withOptLevel(LEVEL)
 									.build();
 	// creation of the pipeline
 	Generator generator(stream_len, num_keys);

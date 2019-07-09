@@ -112,14 +112,14 @@ int main(int argc, char *argv[])
 	SQGenerator *generator = new SQGenerator(rate, stream_len);
 	pipe.add_stage(generator);
 	// create the first stage (Skyline Operator)
-	Pane_Farm sky_pf = PaneFarm_Builder(SkyLineFunction, SkyLineMergeNIC).withTBWindow(milliseconds(win_len), milliseconds(slide_len))
+	Pane_Farm sky_pf = PaneFarm_Builder(SkyLineFunction, SkyLineMergeNIC).withTBWindows(milliseconds(win_len), milliseconds(slide_len))
 					   													 .withParallelism(skyline_plq_degree, skyline_wlq_degree)
 					   													 .withName("skyline")
-					   													 .withOpt(opt_level_inner)
+					   													 .withOptLevel(opt_level_inner)
 					   													 .build();
 	Win_Farm sky_wf = WinFarm_Builder(sky_pf).withParallelism(skyline_wf_degree)
 											 .withName("skyline")
-											 .withOpt(opt_level_outer)
+											 .withOptLevel(opt_level_outer)
 											 .build();
 	pipe.add_stage(&sky_wf);
 	// create the consumer stage (printing statistics every second)
