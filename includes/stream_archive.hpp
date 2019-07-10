@@ -54,7 +54,7 @@ private:
 public:
     StreamArchive( ) { } 
     // constructor
-    StreamArchive(f_compare_t _lessThan): lessThan(_lessThan) {}
+    StreamArchive(compare_func_t _lessThan): lessThan(_lessThan) {}
 
     // method to add a tuple to the archive
     void insert(const tuple_t &_t)

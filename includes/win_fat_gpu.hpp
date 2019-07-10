@@ -77,7 +77,7 @@ private:
     // friendships with other classes in the library
     template<typename T1, typename T2, typename T3, typename T4>
     friend class Win_Farm_GPU;
-    template<typename T1, typename T2, typename T3, typename T4>
+    template<typename T1, typename T2, typename T3>
     friend class Key_Farm_GPU;
     template<typename T1, typename T2, typename T3, typename T4>
     friend class Pane_Farm_GPU;
@@ -229,7 +229,7 @@ private:
         }
         // define the compare function depending on the window type
         compare = [](const tuple_t &t1, const tuple_t &t2) {
-            return std::get<1>(t1.getInfo()) < std::get<1>(t2.getInfo());
+            return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
         };
     }
 
@@ -277,7 +277,7 @@ private:
         }
         // define the compare function depending on the window type
         compare = [](const tuple_t &t1, const tuple_t &t2) {
-            return std::get<1>(t1.getInfo()) < std::get<1>(t2.getInfo());
+            return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
         };
     }
 
@@ -340,8 +340,8 @@ public:
 #endif
         // extract the key and id/timestamp fields from the input tuple
         tuple_t *t = extractTuple<tuple_t, input_t>(wt);
-        size_t key = std::get<0>(t->getInfo()); // key
-        uint64_t id = std::get<1>(t->getInfo()); // identifier 
+        size_t key = std::get<0>(t->getControlFields()); // key
+        uint64_t id = std::get<1>(t->getControlFields()); // identifier 
         // access the descriptor of the input key
         auto it = keyMap.find(key);
         if (it == keyMap.end()) {
@@ -371,7 +371,7 @@ public:
         }
         else {
             // tuples can be received only ordered by id/timestamp
-            uint64_t last_id = std::get<1>((key_d.last_tuple).getInfo());
+            uint64_t last_id = std::get<1>((key_d.last_tuple).getControlFields());
             if (id < last_id) {
                 // the tuple is immediately deleted
                 deleteTuple<tuple_t, input_t>(wt);
@@ -467,12 +467,12 @@ public:
                     res->key = key;
                     res->id = key_d.gwids[i];
                     if (role == MAP) {
-                        res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                        res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                         key_d.emit_counter += map_indexes.second;
                     }
                     else if (role == PLQ) {
                         uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                        res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                        res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                         key_d.emit_counter++;
                     }
                     this->ff_send_out(res);
@@ -508,8 +508,8 @@ public:
 
     result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
     {
-        size_t key = std::get<0>(t->getInfo()); // key
-        uint64_t id =  std::get<1>(t->getInfo()); // identifier or timestamp
+        size_t key = std::get<0>(t->getControlFields()); // key
+        uint64_t id =  std::get<1>(t->getControlFields()); // identifier or timestamp
         // gwid of the first window of that key assigned to this Win_Seq_GPU instance
         uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
         // initial identifer/timestamp of the keyed sub-stream arriving at this Win_Seq_GPU instance
@@ -593,12 +593,12 @@ public:
                     res->key = key;
                     res->id = key_d.gwids[i];
                     if (role == MAP) {
-                        res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                        res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                         key_d.emit_counter += map_indexes.second;
                     }
                     else if (role == PLQ) {
                         uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                        res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                        res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                         key_d.emit_counter++;
                     }
                     this->ff_send_out(res);
@@ -623,9 +623,9 @@ public:
 #endif
         // extract the key and id/timestamp fields from the input tuple
         tuple_t *t = extractTuple<tuple_t, input_t>(wt);
-        size_t key = std::get<0>(t->getInfo()); // key
-        static uint64_t base_ts = std::get<2>(t->getInfo()); // identifier or timestamp
-        uint64_t ts =  std::get<2>(t->getInfo()) - base_ts; // identifier or timestamp
+        size_t key = std::get<0>(t->getControlFields()); // key
+        static uint64_t base_ts = std::get<2>(t->getControlFields()); // identifier or timestamp
+        uint64_t ts =  std::get<2>(t->getControlFields()) - base_ts; // identifier or timestamp
         // access the descriptor of the input key
         auto it = keyMap.find(key);
         if (it == keyMap.end()) {
@@ -654,7 +654,7 @@ public:
         }
         else {
             // tuples can be received only ordered by id/timestamp
-            uint64_t last_ts = std::get<2>((key_d.last_tuple).getInfo()) - base_ts;
+            uint64_t last_ts = std::get<2>((key_d.last_tuple).getControlFields()) - base_ts;
             if ( ts < last_ts ) {
                 // the tuple is immediately deleted
                 deleteTuple<tuple_t, input_t>(wt);
@@ -737,12 +737,12 @@ public:
                 res->key = key;
                 res->id = gwid;
                 if (role == MAP) {
-                    res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                     key_d.emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                    res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
                 for( size_t i = 0; i < slide_len; i++ ) {
@@ -763,12 +763,12 @@ public:
                 res->key = key;
                 res->id = gwid;
                 if (role == MAP) {
-                    res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                     key_d.emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                    res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
                 for( size_t i = 0; i < slide_len && tuples.size( ) > 0; i++ ) {
@@ -818,12 +818,12 @@ public:
                 res->key = key;
                 res->id = gwid;
                 if (role == MAP) {
-                    res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                     key_d.emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                    res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
                 for( size_t i = 0; i < slide_len; i++ ) {
@@ -844,12 +844,12 @@ public:
                 res->key = key;
                 res->id = gwid;
                 if (role == MAP) {
-                    res->setInfo(key, key_d.emit_counter, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
                     key_d.emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                    res->setInfo(key, new_id, std::get<2>(res->getInfo()));
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
                 for( size_t i = 0; i < slide_len && tuples.size( ) > 0; i++ ) {

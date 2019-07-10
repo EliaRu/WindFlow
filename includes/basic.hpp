@@ -190,16 +190,11 @@ class Win_MapReduce;
 template<typename tuple_t, typename result_t, typename fun_t, typename input_t=tuple_t>
 class Win_Seq_GPU;
 
-<<<<<<< HEAD
 template<typename tuple_t, typename result_t, typename fun_t, typename input_t=tuple_t>
 class Win_FAT_GPU;
 
-// forward declaration of the Win_Farm_GPU pattern
-template<typename tuple_t, typename result_t, typename fun_, typename input_t=tuple_t>
-=======
 /// forward declaration of the Win_Farm_GPU pattern
 template<typename tuple_t, typename result_t, typename fun_t, typename input_t=tuple_t>
->>>>>>> 859e7a22d9374eb7c7956bde121f9aa7416f8f40
 class Win_Farm_GPU;
 
 /// forward declaration of the Key_Farm_GPU pattern

@@ -79,8 +79,8 @@ int main(int argc, char *argv[])
             return 0;
         };
 	// creation of the Win_Seq pattern
-        using winseq_t = Win_Seq<decltype( get_tuple_t( L ) ) ,decltype( get_result_t( L ) )>;
-	Win_Seq seq = WinSeq_Builder(F).withCBWindow(win_len, win_slide)
+        using winseq_t = Win_Seq<tuple_t, output_t>;
+	Win_Seq seq = WinSeq_Builder(F).withCBWindows(win_len, win_slide)
 								   .withName("test_sum")
 								   .build();	
 

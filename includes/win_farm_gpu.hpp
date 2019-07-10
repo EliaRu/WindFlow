@@ -223,7 +223,13 @@ private:
                  bool _ordered,
                  opt_level_t _opt_level,
                  PatternConfig _config,
-                 role_t _role): hasComplexWorkers(false), opt_level(_opt_level), winType(CB), num_emitters(_emitter_degree)
+                 role_t _role)
+    : 
+        hasComplexWorkers(false), 
+        outer_opt_level( _opt_level ),
+        inner_opt_level( LEVEL0 ),
+        winType(CB), 
+        num_emitters(_emitter_degree)
     {
         // check the validity of the windowing parameters
         if (_win_len == 0 || _slide_len == 0) {
@@ -248,7 +254,7 @@ private:
         // check the optimization level
         if (_opt_level != LEVEL0) {
             cerr << YELLOW << "WindFlow Warning: optimization level has no effect" << DEFAULT << endl;
-            opt_level = LEVEL0;
+            outer_opt_level = LEVEL0;
         }
         // vector of Win_Seq_GPU instances
         vector<ff_node *> w;
@@ -277,7 +283,7 @@ private:
             // create the Win_Seq_GPU nodes composed with an orderingNodes
             vector<ff_node *> seqs(_pardegree);
             for (size_t i = 0; i < _pardegree; i++) {
-                auto *ord = new OrderingNode<tuple_t, wrapper_in_t>(((winType == CB) ? ID : TS));
+                auto *ord = new Ordering_Node<tuple_t, wrapper_in_t>(((winType == CB) ? ID : TS));
                 // configuration structure of the Win_Seq_GPU instances
                 PatternConfig configSeq(_config.id_inner, _config.n_inner, _config.slide_inner, i, _pardegree, _slide_len);
                 auto *seq = new win_fat_gpu_t( _winFunction, _winLift, _win_len, private_slide, _batch_len, _rebuildFAT, _name + "_wf", configSeq, _role );

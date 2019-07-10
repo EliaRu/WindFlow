@@ -221,6 +221,89 @@ private:
         }
     }
 
+    //private constructor III (incremental queries, it uses a Flat FAT)
+    Win_Seq(f_winlift_t _winLift,
+            f_wincombine_t _winCombine,
+            bool _isWinCombineCommutative,
+            uint64_t _win_len,
+            uint64_t _slide_len,
+            string _name,
+            PatternConfig _config,
+            role_t _role)
+            :
+            winLift( _winLift ),
+            winCombine( _winCombine ),
+            isWinCombineCommutative( _isWinCombineCommutative ),
+            win_len(_win_len),
+            slide_len(_slide_len),
+            winType( CB ),
+            isNIC(false),
+            useFlatFAT( true ),
+            timebasedFAT( false ),
+            name(_name),
+            config(_config),
+            role(_role)
+    {
+        // check the validity of the windowing parameters
+        if (_win_len == 0 || _slide_len == 0) {
+            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        if( _win_len <= _slide_len ) {
+            cerr << RED << "WindFlow Error: "
+            << "FlatFAT implementation supports only sliding windows" 
+            << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // define the compare function depending on the window type
+        compare_func = [](const tuple_t &t1, const tuple_t &t2) {
+            return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
+        };
+        closing_func = []( RuntimeContext& r ) { };
+    }
+
+    Win_Seq(f_winlift_t _winLift,
+            f_wincombine_t _winCombine,
+            bool _isWinCombineCommutative,
+            uint64_t _win_len,
+            uint64_t _slide_len,
+            uint64_t _quantum,
+            string _name,
+            PatternConfig _config,
+            role_t _role)
+            :
+            winLift( _winLift ),
+            winCombine( _winCombine ),
+            isWinCombineCommutative( _isWinCombineCommutative ),
+            win_len(_win_len),
+            slide_len(_slide_len),
+            quantum( _quantum ),
+            winType( CB ),
+            isNIC(false),
+            useFlatFAT( false ),
+            timebasedFAT( true ),
+            name(_name),
+            config(_config),
+            role(_role)
+    {
+        // check the validity of the windowing parameters
+        if (_win_len == 0 || _slide_len == 0) {
+            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        if( _win_len <= _slide_len ) {
+            cerr << RED << "WindFlow Error: "
+            << "FlatFAT implementation supports only sliding windows" 
+            << DEFAULT << endl;
+            exit(EXIT_FAILURE);
+        }
+        // define the compare function depending on the window type
+        compare_func = [](const tuple_t &t1, const tuple_t &t2) {
+            return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
+        };
+        closing_func = []( RuntimeContext& r ) { };
+    }
+
     // method to set the indexes useful if role is MAP
     void setMapIndexes(size_t _first, size_t _second) {
         map_indexes.first = _first; // id
@@ -268,91 +351,6 @@ public:
         init();
     }
 
-    //private constructor III (incremental queries, it uses a Flat FAT)
-    Win_Seq(f_winlift_t _winLift,
-            f_wincombine_t _winCombine,
-            bool _isWinCombineCommutative,
-            uint64_t _win_len,
-            uint64_t _slide_len,
-            string _name,
-            PatternConfig _config,
-            role_t _role)
-            :
-            winLift( _winLift ),
-            winCombine( _winCombine ),
-            isWinCombineCommutative( _isWinCombineCommutative ),
-            win_len(_win_len),
-            slide_len(_slide_len),
-            winType( CB ),
-            isNIC(false),
-            useFlatFAT( true ),
-            timebasedFAT( false ),
-            name(_name),
-            config(_config),
-            role(_role)
-    {
-        // check the validity of the windowing parameters
-        if (_win_len == 0 || _slide_len == 0) {
-            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
-        if( _win_len <= _slide_len ) {
-            cerr << RED << "WindFlow Error: "
-            << "FlatFAT implementation supports only sliding windows" 
-            << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
-        // define the compare function depending on the window type
-        compare = [](const tuple_t &t1, const tuple_t &t2) {
-            return std::get<1>(t1.getInfo()) < std::get<1>(t2.getInfo());
-        };
-    }
-
-    Win_Seq(f_winlift_t _winLift,
-            f_wincombine_t _winCombine,
-            bool _isWinCombineCommutative,
-            uint64_t _win_len,
-            uint64_t _slide_len,
-            uint64_t _quantum,
-            string _name,
-            PatternConfig _config,
-            role_t _role)
-            :
-            winLift( _winLift ),
-            winCombine( _winCombine ),
-            isWinCombineCommutative( _isWinCombineCommutative ),
-            win_len(_win_len),
-            slide_len(_slide_len),
-            quantum( _quantum ),
-            winType( CB ),
-            isNIC(false),
-            useFlatFAT( false ),
-            timebasedFAT( true ),
-            name(_name),
-            config(_config),
-            role(_role)
-    {
-        // check the validity of the windowing parameters
-        if (_win_len == 0 || _slide_len == 0) {
-            cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
-        if( _win_len <= _slide_len ) {
-            cerr << RED << "WindFlow Error: "
-            << "FlatFAT implementation supports only sliding windows" 
-            << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
-        // define the compare function depending on the window type
-        compare = [](const tuple_t &t1, const tuple_t &t2) {
-            return std::get<1>(t1.getInfo()) < std::get<1>(t2.getInfo());
-        };
-    }
-
-    // method to set the indexes useful if role is MAP
-    void setMapIndexes(size_t _first, size_t _second) {
-        map_indexes.first = _first; // id
-        map_indexes.second = _second; // pardegree
 
     /** 
      *  \brief Constructor II
@@ -387,7 +385,9 @@ public:
             config(_config),
             role(_role),
             isNIC(true),
-            isRich(true)
+            isRich(true),
+            useFlatFAT( false ),
+            timebasedFAT( false )
     {
         init();
     }
@@ -425,7 +425,9 @@ public:
             config(_config),
             role(_role),
             isNIC(false),
-            isRich(false)
+            isRich(false),
+            useFlatFAT( false ),
+            timebasedFAT( false )
     {
         init();
     }
@@ -463,7 +465,9 @@ public:
             config(_config),
             role(_role),
             isNIC(false),
-            isRich(true)
+            isRich(true),
+            useFlatFAT( false ),
+            timebasedFAT( false )
     {
         init();
     }
@@ -530,7 +534,7 @@ public:
                 make_pair(
                     key, 
                     Key_Descriptor(
-                        compare, 
+                        compare_func, 
                         role == MAP ? map_indexes.first : 0
                     )
                 )
@@ -696,8 +700,8 @@ public:
 #endif
         // extract the key and id/timestamp fields from the input tuple
         tuple_t *t = extractTuple<tuple_t, input_t>(wt);
-        size_t key = std::get<0>(t->getInfo()); // key
-        uint64_t id =  std::get<1>(t->getInfo()); // identifier or timestamp
+        size_t key = std::get<0>(t->getControlFields()); // key
+        uint64_t id =  std::get<1>(t->getControlFields()); // identifier or timestamp
         // access the descriptor of the input key
         auto it = keyMap.find(key);
         if (it == keyMap.end()) {
@@ -724,7 +728,7 @@ public:
         }
         else {
             // tuples can be received only ordered by id/timestamp
-            uint64_t last_id = std::get<1>((key_d.last_tuple).getInfo());
+            uint64_t last_id = std::get<1>((key_d.last_tuple).getControlFields());
             if (id < last_id) {
                 // the tuple is immediately deleted
                 deleteTuple<tuple_t, input_t>(wt);
@@ -796,15 +800,15 @@ public:
             out = key_d.fat.getResult( key, gwid );
             // purge the tuples from Flat FAT
             key_d.fat.remove( key, gwid, slide_len );
-            out->setInfo( key, gwid, out->ts );
+            out->setControlFields( key, gwid, out->ts );
             // special cases: role is PLQ or MAP    
             if (role == MAP) {
-                out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
+                out->setControlFields(key, key_d.emit_counter, std::get<2>(out->getControlFields()));
                 key_d.emit_counter += map_indexes.second;
             }
             else if (role == PLQ) {
                 uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                out->setInfo(key, new_id, std::get<2>(out->getInfo()));
+                out->setControlFields(key, new_id, std::get<2>(out->getControlFields()));
                 key_d.emit_counter++;
             }
             this->ff_send_out(out);
@@ -839,8 +843,8 @@ public:
 
 result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
 {
-    size_t key = std::get<0>(t->getInfo()); // key
-    uint64_t id =  std::get<1>(t->getInfo()); // identifier or timestamp
+    size_t key = std::get<0>(t->getControlFields()); // key
+    uint64_t id =  std::get<1>(t->getControlFields()); // identifier or timestamp
     // check duplicate or out-of-order tuples
     // gwid of the first window of that key assigned to this Win_Seq instance
     uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
@@ -901,15 +905,15 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         out = key_d.fat.getResult( key, gwid );
         // purge the tuples from Flat FAT
         key_d.fat.remove( key, gwid, slide_len );
-        out->setInfo( key, gwid, out->ts );
+        out->setControlFields( key, gwid, out->ts );
         // special cases: role is PLQ or MAP    
         if (role == MAP) {
-            out->setInfo(key, key_d.emit_counter, std::get<2>(out->getInfo()));
+            out->setControlFields(key, key_d.emit_counter, std::get<2>(out->getControlFields()));
             key_d.emit_counter += map_indexes.second;
         }
         else if (role == PLQ) {
             uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-            out->setInfo(key, new_id, std::get<2>(out->getInfo()));
+            out->setControlFields(key, new_id, std::get<2>(out->getControlFields()));
             key_d.emit_counter++;
         }
         this->ff_send_out(out);
@@ -939,9 +943,9 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
 #endif
         // extract the key and id/timestamp fields from the input tuple
         tuple_t *t = extractTuple<tuple_t, input_t>(wt);
-        size_t key = std::get<0>(t->getInfo()); // key
-        static uint64_t base_ts = std::get<2>(t->getInfo()); // identifier or timestamp
-        uint64_t ts =  std::get<2>(t->getInfo()) - base_ts; // identifier or timestamp
+        size_t key = std::get<0>(t->getControlFields()); // key
+        static uint64_t base_ts = std::get<2>(t->getControlFields()); // identifier or timestamp
+        uint64_t ts =  std::get<2>(t->getControlFields()) - base_ts; // identifier or timestamp
         // access the descriptor of the input key
         auto it = keyMap.find(key);
         if (it == keyMap.end()) {
@@ -967,7 +971,7 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         }
         else {
             // tuples can be received only ordered by id/timestamp
-            uint64_t last_ts = std::get<2>((key_d.last_tuple).getInfo()) - base_ts;
+            uint64_t last_ts = std::get<2>((key_d.last_tuple).getControlFields()) - base_ts;
             if ( ts < last_ts ) {
                 // the tuple is immediately deleted
                 deleteTuple<tuple_t, input_t>(wt);
@@ -1086,15 +1090,15 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
                 out = k.second.fat.getResult( key, gwid );
                 // purge the tuples from Flat FAT
                 k.second.fat.remove( key, gwid, slide_len );
-                out->setInfo( key, gwid, out->ts );
+                out->setControlFields( key, gwid, out->ts );
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
-                    out->setInfo(k.first, (k.second).emit_counter, std::get<2>(out->getInfo()));
+                    out->setControlFields(k.first, (k.second).emit_counter, std::get<2>(out->getControlFields()));
                     (k.second).emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (k.first % config.n_inner) + config.n_inner) % config.n_inner) + ((k.second).emit_counter * config.n_inner);
-                    out->setInfo(k.first, new_id, std::get<2>(out->getInfo()));
+                    out->setControlFields(k.first, new_id, std::get<2>(out->getControlFields()));
                     (k.second).emit_counter++;
                 }
                 this->ff_send_out(out);
@@ -1111,10 +1115,8 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
             key_d.acc.key = k.first;
             key_d.acc.ts = key_d.last_tuple.ts;
             key_d.acc.id = ( key_d.cb_id )++;
-            tuple_t tmp;
-            wrapper_tuple_t<tuple_t> t( &tmp );
             ( void ) ManageWindow( 
-                key_d, &t, reinterpret_cast<tuple_t*>( &( key_d.acc ) ) 
+                key_d, nullptr, reinterpret_cast<tuple_t*>( &( key_d.acc ) ) 
             );
             ( key_d.last_quantum )++;
 
@@ -1133,15 +1135,15 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
                 out = k.second.fat.getResult( key, gwid );
                 // purge the tuples from Flat FAT
                 k.second.fat.remove( key, gwid, slide_len );
-                out->setInfo( key, gwid, out->ts );
+                out->setControlFields( key, gwid, out->ts );
                 // special cases: role is PLQ or MAP
                 if (role == MAP) {
-                    out->setInfo(k.first, (k.second).emit_counter, std::get<2>(out->getInfo()));
+                    out->setControlFields(k.first, (k.second).emit_counter, std::get<2>(out->getControlFields()));
                     (k.second).emit_counter += map_indexes.second;
                 }
                 else if (role == PLQ) {
                     uint64_t new_id = ((config.id_inner - (k.first % config.n_inner) + config.n_inner) % config.n_inner) + ((k.second).emit_counter * config.n_inner);
-                    out->setInfo(k.first, new_id, std::get<2>(out->getInfo()));
+                    out->setControlFields(k.first, new_id, std::get<2>(out->getControlFields()));
                     (k.second).emit_counter++;
                 }
                 this->ff_send_out(out);
