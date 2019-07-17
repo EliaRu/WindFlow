@@ -75,9 +75,9 @@ private:
     // type of the wrapper of input tuples
     using wrapper_in_t = wrapper_tuple_t<tuple_t>;
     // type of the Win_Seq_GPU to be created within the regular constructor
-    using win_seq_gpu_t = Win_Seq_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+    using win_seq_gpu_t = Win_Seq_GPU<tuple_t, result_t, win_F_t, tuple_t>;
 
-    using win_fat_gpu_t = Win_FAT_GPU<tuple_t, result_t, win_F_t, wrapper_in_t>;
+    using win_fat_gpu_t = Win_FAT_GPU<tuple_t, result_t, win_F_t, tuple_t>;
 
     using f_winlift_t =
         function<int( size_t, uint64_t, const tuple_t &, result_t & )>;
@@ -228,6 +228,10 @@ public:
         hasComplexWorkers(false), 
         outer_opt_level( _opt_level ),
         inner_opt_level( LEVEL0 ),
+        inner_type(SEQ_GPU),
+        parallelism(_pardegree),
+        inner_parallelism_1(1),
+        inner_parallelism_2(0),
         winType(CB)
     {
         // check the validity of the windowing parameters
@@ -280,6 +284,10 @@ public:
         hasComplexWorkers(false), 
         outer_opt_level( _opt_level ),
         inner_opt_level( LEVEL0 ),
+        inner_type(SEQ_GPU),
+        parallelism(_pardegree),
+        inner_parallelism_1(1),
+        inner_parallelism_2(0),
         winType(CB)
     {
         // check the validity of the windowing parameters

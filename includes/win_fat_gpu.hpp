@@ -36,12 +36,13 @@
 #define WIN_FAT_GPU_H
 
 // includes
-#include <list>
+#include <vector>
 #include <string>
 #include <unordered_map>
 #include <math.h>
 #include <cassert>
 #include <iostream>
+#include <cstring>
 
 #include <ff/node.hpp>
 #include <window.hpp>
@@ -86,14 +87,15 @@ private:
     // struct of a key descriptor
     struct Key_Descriptor
     {
-        list<result_t> tuples;
+        vector<result_t> tuples;
         BatchedFAT<tuple_t, result_t, win_F_t> bfat;
         result_t acc;
         uint64_t cb_id;
         uint64_t last_quantum;
-        list<win_t> wins; // open windows of this key
         uint64_t emit_counter; // progressive counter (used if role is PLQ or MAP)
         uint64_t rcv_counter; // number of tuples received of this key
+        uint64_t slide_counter;
+        uint64_t ts_rcv_counter;
         tuple_t last_tuple; // copy of the last tuple received of this key
         uint64_t next_lwid; // next window to be opened of this key (lwid)
         size_t batchedWin; // number of batched windows of the key
@@ -119,12 +121,15 @@ private:
           last_quantum( 0 ),
           emit_counter(_emit_counter),
           rcv_counter(0),
+          slide_counter( 0 ),
+          ts_rcv_counter(0),
           next_lwid(0),
           batchedWin(0) 
         { 
             tuple_t tmp;
             _winLift( 0, 0, tmp, acc );
-            
+            tuples.reserve( _batchSize );
+            gwids.reserve( _numWindows );
         }
 
         // move constructor
@@ -134,9 +139,10 @@ private:
                        acc( move( _k.acc ) ),
                        cb_id( move( _k.cb_id ) ),
                        last_quantum( move ( _k.last_quantum ) ),
-                       wins(move(_k.wins)),
                        emit_counter(_k.emit_counter),
                        rcv_counter(_k.rcv_counter),
+                       slide_counter( _k.slide_counter ),
+                       ts_rcv_counter(_k.ts_rcv_counter),
                        last_tuple(_k.last_tuple),
                        next_lwid(_k.next_lwid),
                        batchedWin(_k.batchedWin),
@@ -167,7 +173,6 @@ private:
     uint64_t quantum;
     result_t *host_results = nullptr; // array of results copied back from the GPU
     // GPU variables
-    cudaStream_t cudaStream; // CUDA stream used by this Win_Seq_GPU instance
     size_t no_thread_block; // number of CUDA threads per block
     tuple_t *Bin = nullptr; // array of tuples in the micro-batch (allocated on the GPU)
     result_t *Bout = nullptr; // array of results of the micro-batch (allocated on the GPU)
@@ -222,11 +227,6 @@ private:
             cerr << RED << "WindFlow Error: batch length cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
-        // create the CUDA stream
-        if (cudaStreamCreate(&cudaStream) != cudaSuccess) {
-            cerr << RED << "WindFlow Error: cudaStreamCreate() returns error code" << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
         // define the compare function depending on the window type
         compare = [](const tuple_t &t1, const tuple_t &t2) {
             return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
@@ -248,7 +248,7 @@ private:
                 winFunction(_winFunction),
                 win_len(_win_len),
                 slide_len(_slide_len),
-                quantum( _quantum ),
+                quantum( _quantum * 1000 ),
                 winType( CB ),
                 rebuildFAT( _rebuildFAT ),
                 isFirstBatch( true ),
@@ -268,11 +268,6 @@ private:
         // check the validity of the batch length
         if (_batch_len == 0) {
             cerr << RED << "WindFlow Error: batch length cannot be zero" << DEFAULT << endl;
-            exit(EXIT_FAILURE);
-        }
-        // create the CUDA stream
-        if (cudaStreamCreate(&cudaStream) != cudaSuccess) {
-            cerr << RED << "WindFlow Error: cudaStreamCreate() returns error code" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
         // define the compare function depending on the window type
@@ -367,6 +362,7 @@ public:
         // check duplicate or out-of-order tuples
         if (key_d.rcv_counter == 0) {
             key_d.rcv_counter++;
+            key_d.slide_counter++;
             key_d.last_tuple = *t;
         }
         else {
@@ -379,6 +375,7 @@ public:
             }
             else {
                 key_d.rcv_counter++;
+                key_d.slide_counter++;
                 key_d.last_tuple = *t;
             }
         }
@@ -396,95 +393,89 @@ public:
             deleteTuple<tuple_t, input_t>(wt);
             return this->GO_ON;
         }
-        // determine the local identifier of the last window containing t
-        long last_w = -1;
-        // sliding or tumbling windows
-        if (win_len >= slide_len)
-            last_w = ceil(((double) id + 1 - initial_id)/((double) slide_len)) - 1;
-        // hopping windows
-        else {
-            uint64_t n = floor((double) (id-initial_id) / slide_len);
-            last_w = n;
-            // if the tuple does not belong to at least one window assigned to this Win_Seq instance
-            if ((id-initial_id < n*(slide_len)) || (id-initial_id >= (n*slide_len)+win_len)) {
-                // if it is not an EOS marker, we delete the tuple immediately
-                if (!isEOSMarker<tuple_t, input_t>(*wt)) {
-                    // delete the received tuple
-                    deleteTuple<tuple_t, input_t>(wt);
-                    return this->GO_ON;
-                }
-            }
-        }
-
-        auto &wins = key_d.wins;
-        // create all the new windows that need to be opened by the arrival of t
-        for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
-            // translate the lwid into the corresponding gwid
+        
+/*
+        if ((key_d.rcv_counter > win_len) && (key_d.rcv_counter % slide_len == 0)) {
+            key_d.batchedWin++;
+            uint64_t lwid = key_d.next_lwid;
             uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
-            wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
+            key_d.gwids.push_back(gwid);
             key_d.next_lwid++;
         }
-        
-        // last received tuple already in the archive
-        auto& win = wins.front( );
-        if( win.onTuple( *t ) == FIRED ) {
-            key_d.batchedWin++;
-            key_d.gwids.push_back( win.getGWID( ) );
-            wins.pop_front( );
-            if( key_d.batchedWin == batch_len ) {
-                assert( key_d.gwids.size( ) == batch_len );
-#if defined(LOG_DIR)
-                rcvTuplesTriggering++;
-                isTriggering = true;
-#endif
 
-                vector<result_t> batchedTuples( 
-                    key_d.tuples.begin( ), 
-                    key_d.tuples.end( )
-                );
-                if( rebuildFAT ) {
-                    key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
-                    auto it = key_d.tuples.begin( );
-                    for( size_t i = 0; i < batch_len * slide_len; i++ ) {
-                        it++;
-                    }
-                    key_d.tuples.erase( 
-                        key_d.tuples.begin( ),
-                        it
-                    );
-                } else {
-                    if( isFirstBatch ) {
-                        key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
-                        isFirstBatch = false;
-                    } else {
-                        key_d.bfat.update( move( batchedTuples ), key, 0, 0 );
-                    }
-                    key_d.tuples.clear( );
-                }
-                auto results = key_d.bfat.getResults( );
-                for( size_t i = 0; i < batch_len; i++ ) {
-                    result_t *res = new result_t( results[i] );
-                    res->key = key;
-                    res->id = key_d.gwids[i];
-                    if (role == MAP) {
-                        res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
-                        key_d.emit_counter += map_indexes.second;
-                    }
-                    else if (role == PLQ) {
-                        uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                        res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
-                        key_d.emit_counter++;
-                    }
-                    this->ff_send_out(res);
-                }
-                key_d.batchedWin = 0;
-                (key_d.gwids).clear();
-            }
-        }
+*/
         if (!isEOSMarker<tuple_t, input_t>(*wt)) {
             result_t res;
             winLift( key, t->id, *t, res );
             (key_d.tuples).push_back( res );
+        }
+
+        if( key_d.rcv_counter == win_len )
+        {
+            key_d.batchedWin++;
+            uint64_t lwid = key_d.next_lwid;
+            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.gwids.push_back(gwid);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        } else if( ( key_d.rcv_counter > win_len ) && key_d.slide_counter % slide_len == 0 ) {
+            key_d.batchedWin++;
+            uint64_t lwid = key_d.next_lwid;
+            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.gwids.push_back(gwid);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        }
+
+        if( key_d.batchedWin == batch_len ) {
+            //assert( key_d.gwids.size( ) == batch_len );
+#if defined(LOG_DIR)
+            rcvTuplesTriggering++;
+            isTriggering = true;
+#endif
+            if (!isFirstBatch) {
+                auto results = key_d.bfat.waitResults();
+                result_t *copyForOutput = new result_t[batch_len];
+                memcpy( copyForOutput, results, batch_len * sizeof( result_t ) );
+                result_t *res = new result_t( );
+                res->key = key;
+                res->id = key_d.gwids[0];
+                res->pack = copyForOutput;
+                for( size_t i = 0; i < batch_len; i++ ) {
+                    copyForOutput[i].key = key;
+                    copyForOutput[i].id = key_d.gwids[i];
+                }
+
+                if (role == MAP) {
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
+                    key_d.emit_counter += map_indexes.second;
+                }
+                else if (role == PLQ) {
+                    uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
+                    key_d.emit_counter++;
+                }
+                this->ff_send_out(res);
+
+                (key_d.gwids).erase((key_d.gwids).begin(), (key_d.gwids).begin()+batch_len);
+            }      
+            if( rebuildFAT ) {
+                key_d.bfat.build( key_d.tuples, key, 0, 0 );
+                key_d.tuples.erase( 
+                    key_d.tuples.begin( ),
+                    key_d.tuples.begin( ) + batch_len * slide_len
+                );
+            } else {
+                if( isFirstBatch ) {
+                    key_d.bfat.build( key_d.tuples, key, 0, 0 );
+                    isFirstBatch = false;
+                } else {
+                    key_d.bfat.update( key_d.tuples, key, 0, 0 );
+                }
+                key_d.tuples.clear( );
+            }
+            key_d.batchedWin = 0;
+            key_d.bfat.startGettingResult();
         }
 
         // delete the received tuple
@@ -523,92 +514,79 @@ public:
         if (id < initial_id) {
             return this->GO_ON;
         }
-        // determine the local identifier of the last window containing t
-        long last_w = -1;
-        // sliding or tumbling windows
-        if (win_len >= slide_len)
-            last_w = ceil(((double) id + 1 - initial_id)/((double) slide_len)) - 1;
-        // hopping windows
-        else {
-            uint64_t n = floor((double) (id-initial_id) / slide_len);
-            last_w = n;
-            // if the tuple does not belong to at least one window assigned to this Win_Seq instance
-            if ((id-initial_id < n*(slide_len)) || (id-initial_id >= (n*slide_len)+win_len)) {
-                // if it is not an EOS marker, we delete the tuple immediately
-                if (!isEOSMarker<tuple_t, input_t>(*wt)) {
-                    // delete the received tuple
-                    return this->GO_ON;
-                }
-            }
-        }
 
-        auto &wins = key_d.wins;
-        // create all the new windows that need to be opened by the arrival of t
-        for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
-            // translate the lwid into the corresponding gwid
-            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
-            wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
-            key_d.next_lwid++;
-        }
-        
-        // last received tuple already in the archive
-        auto& win = wins.front( );
-        if( win.onTuple( *t ) == FIRED ) {
-            key_d.batchedWin++;
-            key_d.gwids.push_back( win.getGWID( ) );
-            wins.pop_front( );
-            if( key_d.batchedWin == batch_len ) {
-                assert( key_d.gwids.size( ) == batch_len );
-#if defined(LOG_DIR)
-                rcvTuplesTriggering++;
-                isTriggering = true;
-#endif
-
-                vector<result_t> batchedTuples( 
-                    key_d.tuples.begin( ), 
-                    key_d.tuples.end( )
-                );
-                if( rebuildFAT ) {
-                    key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
-                    auto it = key_d.tuples.begin( );
-                    for( size_t i = 0; i < batch_len * slide_len; i++ ) {
-                        it++;
-                    }
-                    key_d.tuples.erase( 
-                        key_d.tuples.begin( ),
-                        it
-                    );
-                } else {
-                    if( isFirstBatch ) {
-                        key_d.bfat.build( move( batchedTuples ), key, 0, 0 );
-                        isFirstBatch = false;
-                    } else {
-                        key_d.bfat.update( move( batchedTuples ), key, 0, 0 );
-                    }
-                    key_d.tuples.clear( );
-                }
-                auto results = key_d.bfat.getResults( );
-                for( size_t i = 0; i < batch_len; i++ ) {
-                    result_t *res = new result_t( results[i] );
-                    res->key = key;
-                    res->id = key_d.gwids[i];
-                    if (role == MAP) {
-                        res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
-                        key_d.emit_counter += map_indexes.second;
-                    }
-                    else if (role == PLQ) {
-                        uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
-                        res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
-                        key_d.emit_counter++;
-                    }
-                    this->ff_send_out(res);
-                }
-                key_d.batchedWin = 0;
-                (key_d.gwids).clear();
-            }
-        }
         if (!isEOSMarker<tuple_t, input_t>(*wt)) {
             (key_d.tuples).push_back( *reinterpret_cast<result_t*>( t ) );
+            key_d.ts_rcv_counter++;
+        }
+
+        if( key_d.ts_rcv_counter == win_len )
+        {
+            key_d.batchedWin++;
+            uint64_t lwid = key_d.next_lwid;
+            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.gwids.push_back(gwid);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        } else if( ( key_d.ts_rcv_counter > win_len ) && key_d.slide_counter % slide_len == 0 ) {
+            key_d.batchedWin++;
+            uint64_t lwid = key_d.next_lwid;
+            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.gwids.push_back(gwid);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        }
+
+        // last received tuple already in the archive
+        if( key_d.batchedWin == batch_len ) {
+            //assert( key_d.gwids.size( ) == batch_len );
+#if defined(LOG_DIR)
+            rcvTuplesTriggering++;
+            isTriggering = true;
+#endif
+            if (!isFirstBatch) {
+                auto results = key_d.bfat.waitResults();
+                result_t *copyForOutput = new result_t[batch_len];
+                memcpy( copyForOutput, results, batch_len * sizeof( result_t ) );
+                result_t *res = new result_t( );
+                res->key = key;
+                res->id = key_d.gwids[0];
+                res->pack = copyForOutput;
+                for( size_t i = 0; i < batch_len; i++ ) {
+                    copyForOutput[i].key = key;
+                    copyForOutput[i].id = key_d.gwids[i];
+                }
+
+                if (role == MAP) {
+                    res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
+                    key_d.emit_counter += map_indexes.second;
+                }
+                else if (role == PLQ) {
+                    uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
+                    res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
+                    key_d.emit_counter++;
+                }
+                this->ff_send_out(res);
+
+                (key_d.gwids).erase((key_d.gwids).begin(), (key_d.gwids).begin()+batch_len);
+            }      
+            if( rebuildFAT ) {
+                key_d.bfat.build( key_d.tuples, key, 0, 0 );
+                key_d.tuples.erase( 
+                    key_d.tuples.begin( ),
+                    key_d.tuples.begin( ) + batch_len * slide_len
+                );
+            } else {
+                if( isFirstBatch ) {
+                    key_d.bfat.build( key_d.tuples, key, 0, 0 );
+                    isFirstBatch = false;
+                } else {
+                    key_d.bfat.update( key_d.tuples, key, 0, 0 );
+                }
+                key_d.tuples.clear( );
+            }
+            key_d.batchedWin = 0;
+            key_d.bfat.startGettingResult();
         }
         return this->GO_ON;
     }
@@ -709,17 +687,42 @@ public:
 
     void countbasedEosNotify( ssize_t id )
     {
-
         for( auto &k: keyMap ) {
             size_t key = k.first;
             Key_Descriptor &key_d = k.second;
-            auto &wins = key_d.wins;
-            list<result_t> tuples;
+
+            auto results = key_d.bfat.waitResults();
+            result_t *copyForOutput = new result_t[batch_len];
+            memcpy( copyForOutput, results, batch_len * sizeof( result_t ) );
+            result_t *res = new result_t( );
+            res->key = key;
+            res->id = key_d.gwids[0];
+            res->pack = copyForOutput;
+            for( size_t i = 0; i < batch_len; i++ ) {
+                copyForOutput[i].key = key;
+                copyForOutput[i].id = key_d.gwids[i];
+            }
+
+            if (role == MAP) {
+                res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
+                key_d.emit_counter += map_indexes.second;
+            }
+            else if (role == PLQ) {
+                uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
+                res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
+                key_d.emit_counter++;
+            }
+            this->ff_send_out(res);
+
+            (key_d.gwids).erase((key_d.gwids).begin(), (key_d.gwids).begin()+batch_len);
+
+            vector<result_t> tuples;
             if( !rebuildFAT && !isFirstBatch ) {
                 tuples = key_d.bfat.getBatchedTuples( );
-                for( size_t i = 0; i < batch_len * slide_len; i++ ) {
-                    tuples.pop_front( );
-                }
+                tuples.erase( 
+                    tuples.begin( ), 
+                    tuples.begin( ) + batch_len * slide_len 
+                );
             }
             tuples.insert( 
                 tuples.end( ), 
@@ -745,13 +748,20 @@ public:
                     res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
-                for( size_t i = 0; i < slide_len; i++ ) {
-                    tuples.pop_front( );
-                }
+                tuples.erase( 
+                    tuples.begin( ),
+                    tuples.begin( ) + slide_len
+                );
                 this->ff_send_out(res);
             }
-            for( auto &win : wins ) {
-                auto gwid = win.getGWID( );
+
+            size_t numIncompletedWins = 
+                ceil( tuples.size( ) / ( double ) slide_len );
+            for( size_t i = 0; i < numIncompletedWins; i++ ) {
+                uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
+                uint64_t lwid = key_d.next_lwid;
+                uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+                key_d.next_lwid++;
 
                 result_t *res = new result_t( );
                 for( auto it = tuples.begin( );
@@ -771,9 +781,13 @@ public:
                     res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
-                for( size_t i = 0; i < slide_len && tuples.size( ) > 0; i++ ) {
-                    tuples.pop_front( );
-                }
+                auto lastPos = 
+                    tuples.end( ) <= tuples.begin( ) + slide_len ?
+                    tuples.end( ) : tuples.begin( ) + slide_len;
+                tuples.erase(
+                    tuples.begin( ),
+                    lastPos
+                );
                 this->ff_send_out(res);
             }
         }
@@ -784,7 +798,31 @@ public:
         for( auto &k: keyMap ) {
             size_t key = k.first;
             Key_Descriptor &key_d = k.second;
-            auto &wins = key_d.wins;
+
+            auto results = key_d.bfat.waitResults();
+            result_t *copyForOutput = new result_t[batch_len];
+            memcpy( copyForOutput, results, batch_len * sizeof( result_t ) );
+            result_t *res = new result_t( );
+            res->key = key;
+            res->id = key_d.gwids[0];
+            res->pack = copyForOutput;
+            for( size_t i = 0; i < batch_len; i++ ) {
+                copyForOutput[i].key = key;
+                copyForOutput[i].id = key_d.gwids[i];
+            }
+
+            if (role == MAP) {
+                res->setControlFields(key, key_d.emit_counter, std::get<2>(res->getControlFields()));
+                key_d.emit_counter += map_indexes.second;
+            }
+            else if (role == PLQ) {
+                uint64_t new_id = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) + (key_d.emit_counter * config.n_inner);
+                res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
+                key_d.emit_counter++;
+            }
+            this->ff_send_out(res);
+
+            (key_d.gwids).erase((key_d.gwids).begin(), (key_d.gwids).begin()+batch_len);
 
             key_d.acc.key = k.first;
             key_d.acc.ts = key_d.last_tuple.ts;
@@ -795,12 +833,13 @@ public:
                 key_d, nullptr, reinterpret_cast<tuple_t*>( &( key_d.acc ) ) 
             );
 
-            list<result_t> tuples;
+            vector<result_t> tuples;
             if( !rebuildFAT && !isFirstBatch ) {
                 tuples = key_d.bfat.getBatchedTuples( );
-                for( size_t i = 0; i < batch_len * slide_len; i++ ) {
-                    tuples.pop_front( );
-                }
+                tuples.erase( 
+                    tuples.begin( ), 
+                    tuples.begin( ) + batch_len * slide_len 
+                );
             }
             tuples.insert( 
                 tuples.end( ), 
@@ -826,13 +865,19 @@ public:
                     res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
-                for( size_t i = 0; i < slide_len; i++ ) {
-                    tuples.pop_front( );
-                }
+                tuples.erase( 
+                    tuples.begin( ),
+                    tuples.begin( ) + slide_len
+                );
                 this->ff_send_out(res);
             }
-            for( auto &win : wins ) {
-                auto gwid = win.getGWID( );
+            size_t numIncompletedWins = 
+                ceil( tuples.size( ) / ( double ) slide_len );
+            for( size_t i = 0; i < numIncompletedWins; i++ ) {
+                uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
+                uint64_t lwid = key_d.next_lwid;
+                uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+                key_d.next_lwid++;
 
                 result_t *res = new result_t( );
                 for( auto it = tuples.begin( );
@@ -852,9 +897,13 @@ public:
                     res->setControlFields(key, new_id, std::get<2>(res->getControlFields()));
                     key_d.emit_counter++;
                 }
-                for( size_t i = 0; i < slide_len && tuples.size( ) > 0; i++ ) {
-                    tuples.pop_front( );
-                }
+                auto lastPos = 
+                    tuples.end( ) <= tuples.begin( ) + slide_len ?
+                    tuples.end( ) : tuples.begin( ) + slide_len;
+                tuples.erase(
+                    tuples.begin( ),
+                    lastPos
+                );
                 this->ff_send_out(res);
             }
         }

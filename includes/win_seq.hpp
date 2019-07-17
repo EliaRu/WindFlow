@@ -120,6 +120,8 @@ private:
         list<win_t> wins; // open windows of this key
         uint64_t emit_counter; // progressive counter (used if role is PLQ or MAP)
         uint64_t rcv_counter; // number of tuples received of this key
+        uint64_t slide_counter;
+        uint64_t ts_rcv_counter;
         tuple_t last_tuple; // copy of the last tuple received of this key
         uint64_t next_lwid; // next window to be opened of this key (lwid)
 
@@ -130,6 +132,8 @@ private:
                        cb_id( 0 ),
                        last_quantum( 0 ),
                        rcv_counter(0),
+                       slide_counter( 0 ),
+                       ts_rcv_counter( 0 ),
                        next_lwid(0)
         {
         }
@@ -146,6 +150,8 @@ private:
             cb_id( 0 ),
             last_quantum( 0 ),
             rcv_counter(0),
+            slide_counter( 0 ),
+            ts_rcv_counter( 0 ),
             next_lwid(0)
         {
             tuple_t t;
@@ -163,6 +169,8 @@ private:
                        wins(move(_k.wins)),
                        emit_counter(_k.emit_counter),
                        rcv_counter(_k.rcv_counter),
+                       slide_counter( _k.slide_counter ),
+                       ts_rcv_counter( _k.ts_rcv_counter ),
                        next_lwid(_k.next_lwid) {}
     };
     win_func_t win_func; // function for the non-incremental window processing
@@ -237,9 +245,10 @@ private:
             win_len(_win_len),
             slide_len(_slide_len),
             winType( CB ),
+            timebasedFAT( false ),
             isNIC(false),
             useFlatFAT( true ),
-            timebasedFAT( false ),
+            isRich( false ),
             name(_name),
             config(_config),
             role(_role)
@@ -249,6 +258,7 @@ private:
             cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
+
         if( _win_len <= _slide_len ) {
             cerr << RED << "WindFlow Error: "
             << "FlatFAT implementation supports only sliding windows" 
@@ -259,6 +269,7 @@ private:
         compare_func = [](const tuple_t &t1, const tuple_t &t2) {
             return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
         };
+
         closing_func = []( RuntimeContext& r ) { };
     }
 
@@ -277,11 +288,12 @@ private:
             isWinCombineCommutative( _isWinCombineCommutative ),
             win_len(_win_len),
             slide_len(_slide_len),
-            quantum( _quantum ),
+            quantum( _quantum * 1000 ),
             winType( CB ),
             isNIC(false),
             useFlatFAT( false ),
             timebasedFAT( true ),
+            isRich( false ),
             name(_name),
             config(_config),
             role(_role)
@@ -291,6 +303,7 @@ private:
             cerr << RED << "WindFlow Error: window length or slide cannot be zero" << DEFAULT << endl;
             exit(EXIT_FAILURE);
         }
+
         if( _win_len <= _slide_len ) {
             cerr << RED << "WindFlow Error: "
             << "FlatFAT implementation supports only sliding windows" 
@@ -301,6 +314,7 @@ private:
         compare_func = [](const tuple_t &t1, const tuple_t &t2) {
             return std::get<1>(t1.getControlFields()) < std::get<1>(t2.getControlFields());
         };
+
         closing_func = []( RuntimeContext& r ) { };
     }
 
@@ -724,6 +738,7 @@ public:
         // check duplicate or out-of-order tuples
         if (key_d.rcv_counter == 0) {
             key_d.rcv_counter++;
+            key_d.slide_counter++;
             key_d.last_tuple = *t;
         }
         else {
@@ -736,6 +751,7 @@ public:
             }
             else {
                 key_d.rcv_counter++;
+                key_d.slide_counter++;
                 key_d.last_tuple = *t;
             }
         }
@@ -754,41 +770,30 @@ public:
             return this->GO_ON;
         }
 
-        // determine the local identifier of the last window containing t
-        long last_w = -1;
-        // sliding or tumbling windows
-        if (win_len >= slide_len)
-            last_w = ceil(((double) id + 1 - initial_id)/((double) slide_len)) - 1;
-        // hopping windows
-        else {
-            uint64_t n = floor((double) (id-initial_id) / slide_len);
-            last_w = n;
-            // if the tuple does not belong to at least one window assigned to this Win_Seq instance
-            if ((id-initial_id < n*(slide_len)) || (id-initial_id >= (n*slide_len)+win_len)) {
-                // if it is not an EOS marker, we delete the tuple immediately
-                if (!isEOSMarker<tuple_t, input_t>(*wt)) {
-                    // delete the received tuple
-                    deleteTuple<tuple_t, input_t>(wt);
-                    return this->GO_ON;
-                }
-            }
-        }
-        auto &wins = key_d.wins;
-        // create all the new windows that need to be opened by the arrival of t
-        for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
-            // translate the lwid into the corresponding gwid
-            uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
-            wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
-            key_d.next_lwid++;
+        if (!isEOSMarker<tuple_t, input_t>(*wt)) {
+            result_t res;
+            winLift( key, t->id, *t, res );
+            (key_d.received_tuples).push_back( res );
         }
 
         size_t cnt_fired = 0;
-        // evaluate all the open windows
-        assert( wins.size( ) > 0 );
-        auto& win = wins.front( );
-        uint64_t gwid = win.getGWID( );
-        if( win.onTuple(*t) == FIRED ) {
-            cnt_fired++;
+        uint64_t gwid;
+        if( key_d.rcv_counter == win_len )
+        {
+            cnt_fired = 1;
+            uint64_t lwid = key_d.next_lwid;
+            gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        } else if( ( key_d.rcv_counter > win_len ) && key_d.slide_counter % slide_len == 0 ) {
+            cnt_fired = 1;
+            uint64_t lwid = key_d.next_lwid;
+            gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+            key_d.next_lwid++;
+            key_d.slide_counter = 0;
+        }
+
+        if( cnt_fired == 1 ) {
             if( key_d.fat.insert( key, gwid, key_d.received_tuples ) < 0 ) {
                 cout << RED << "Errore nella fat.insert "
                 << DEFAULT << endl;
@@ -813,20 +818,7 @@ public:
             }
             this->ff_send_out(out);
         }
-        // the first time a window doesn't fire it inserts the
-        // tuple in the FlatFAT once
-        if( !isEOSMarker<tuple_t, input_t>(*wt) ) {
-            result_t res;
-            winLift( key, 0, *t, res );
-            key_d.received_tuples.push_back( res );
-        }
 
-        // purge the fired windows
-        size_t i = 0;
-        auto jt = wins.begin( );
-        for( ; i < cnt_fired; i++, jt++ ) {
-        }
-        wins.erase(wins.begin(), jt );
         // delete the received tuple
         deleteTuple<tuple_t, input_t>(wt);
 #if defined(LOG_DIR)
@@ -887,13 +879,29 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         key_d.next_lwid++;
     }
 
+    if( !isEOSMarker<tuple_t, input_t>(*wt) ) {
+        key_d.received_tuples.push_back( *reinterpret_cast<result_t*>( t ) );
+        key_d.ts_rcv_counter++;
+    }
+
     size_t cnt_fired = 0;
-    // evaluate all the open windows
-    assert( wins.size( ) > 0 );
-    auto& win = wins.front( );
-    uint64_t gwid = win.getGWID( );
-    if( win.onTuple(*t) == FIRED ) {
-        cnt_fired++;
+    uint64_t gwid;
+    if( key_d.ts_rcv_counter == win_len )
+    {
+        cnt_fired = 1;
+        uint64_t lwid = key_d.next_lwid;
+        gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+        key_d.next_lwid++;
+        key_d.slide_counter = 0;
+    } else if( ( key_d.ts_rcv_counter > win_len ) && key_d.slide_counter % slide_len == 0 ) {
+        cnt_fired = 1;
+        uint64_t lwid = key_d.next_lwid;
+        gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+        key_d.next_lwid++;
+        key_d.slide_counter = 0;
+    }
+
+    if( cnt_fired == 1 ) {
         if( key_d.fat.insert( key, gwid, key_d.received_tuples ) < 0 ) {
             cout << RED << "Errore nella fat.insert "
             << DEFAULT << endl;
@@ -918,18 +926,6 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         }
         this->ff_send_out(out);
     }
-    // the first time a window doesn't fire it inserts the
-    // tuple in the FlatFAT once
-    if( !isEOSMarker<tuple_t, input_t>(*wt) ) {
-        key_d.received_tuples.push_back( *reinterpret_cast<result_t*>( t ) );
-    }
-
-    // purge the fired windows
-    size_t i = 0;
-    auto jt = wins.begin( );
-    for( ; i < cnt_fired; i++, jt++ ) {
-    }
-    wins.erase(wins.begin(), jt );
 
     return this->GO_ON;
 }
@@ -1074,17 +1070,22 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
     void flatFATEosNotify( ssize_t id ) {
         // iterate over all the keys
         for (auto &k: keyMap) {
-            auto &wins = (k.second).wins;
             // iterate over all the existing windows of the key
-            size_t i = 0;
+            size_t key = k.first;
+            auto &tuples = k.second.received_tuples;
+            auto &key_d = k.second;
+
             k.second.fat.insert( 
                 k.first, 
-                wins.front( ).getGWID( ), 
+                0, 
                 k.second.received_tuples 
             );
-            for (auto &win: wins) {
-                size_t key = k.first;
-                uint64_t gwid = win.getGWID( );
+
+            while( !key_d.fat.isEmpty( ) ) {
+                uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
+                uint64_t lwid = key_d.next_lwid;
+                uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+                key_d.next_lwid++;
                 //send out the result of the window
                 result_t *out;
                 out = k.second.fat.getResult( key, gwid );
@@ -1109,6 +1110,7 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
     void timebasedEosNotify( ssize_t id ) {
         // iterate over all the keys
         for (auto &k: keyMap) {
+            size_t key = k.first;
             auto &wins = (k.second).wins;
             auto &key_d = k.second;
 
@@ -1121,15 +1123,16 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
             ( key_d.last_quantum )++;
 
             // iterate over all the existing windows of the key
-            size_t i = 0;
             k.second.fat.insert( 
                 k.first, 
-                wins.front( ).getGWID( ), 
+                0, 
                 k.second.received_tuples 
             );
-            for (auto &win: wins) {
-                size_t key = k.first;
-                uint64_t gwid = win.getGWID( );
+            while( !key_d.fat.isEmpty( ) ) {
+                uint64_t first_gwid_key = ((config.id_inner - (key % config.n_inner) + config.n_inner) % config.n_inner) * config.n_outer + (config.id_outer - (key % config.n_outer) + config.n_outer) % config.n_outer;
+                uint64_t lwid = key_d.next_lwid;
+                uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
+                key_d.next_lwid++;
                 //send out the result of the window
                 result_t *out;
                 out = k.second.fat.getResult( key, gwid );

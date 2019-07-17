@@ -118,7 +118,7 @@ private:
     T* d_tree;
     T* d_results;
     T* tuples;
-    vector<T> results;
+    T* results;
     vector<T> initResults;
     size_t treeSize;
     size_t treeMemSize;
@@ -168,7 +168,7 @@ public:
 
         gpuErrChk( cudaMalloc( ( void ** ) &d_tree, treeMemSize ) );
 
-        results.resize( Nb );
+        cudaMallocHost( ( void ** ) &results, Nb * sizeof( T ) );
         initResults.resize( Nb, zero );
         gpuErrChk( cudaMalloc( ( void ** )&d_results, Nb * sizeof( T ) ) );
         tuples = new T[batchSize];
@@ -404,11 +404,11 @@ public:
         return true;
     }
 
-    const vector<T>& getResults( )
+    const T* getResults( )
     {
         gpuErrChk( 
             cudaMemcpy( 
-                ( void * ) results.data( ),
+                ( void * ) results,
                 ( void * ) d_results,
                 Nb * sizeof( T ), 
                 cudaMemcpyDeviceToHost ) 
@@ -416,7 +416,24 @@ public:
         return results;
     }
 
-    list<T> getBatchedTuples( ) {
+    void startGettingResult()
+    {
+        gpuErrChk(
+            cudaMemcpyAsync(
+                (void *) results,
+                (void *) d_results,
+                Nb * sizeof(T),
+                cudaMemcpyDeviceToHost)
+        );
+    }
+
+    const T* waitResults()
+    {
+        cudaDeviceSynchronize();
+        return results;
+    }
+
+    vector<T> getBatchedTuples( ) {
 
         gpuErrChk( 
             cudaMemcpy( 
@@ -434,7 +451,7 @@ public:
                 cudaMemcpyDeviceToHost
             )
         );
-        return list<T>( tuples, tuples + batchSize );
+        return vector<T>( tuples, tuples + batchSize );
     }
     
     BatchedFAT( BatchedFAT const & ) = delete;
