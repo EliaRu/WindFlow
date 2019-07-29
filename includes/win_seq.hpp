@@ -852,37 +852,12 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         return this->GO_ON;
     }
 
-    // determine the local identifier of the last window containing t
-    long last_w = -1;
-    // sliding or tumbling windows
-    if (win_len >= slide_len)
-        last_w = ceil(((double) id + 1 - initial_id)/((double) slide_len)) - 1;
-    // hopping windows
-    else {
-        uint64_t n = floor((double) (id-initial_id) / slide_len);
-        last_w = n;
-        // if the tuple does not belong to at least one window assigned to this Win_Seq instance
-        if ((id-initial_id < n*(slide_len)) || (id-initial_id >= (n*slide_len)+win_len)) {
-            // if it is not an EOS marker, we delete the tuple immediately
-            if (!isEOSMarker<tuple_t, input_t>(*wt)) {
-                // delete the received tuple
-                return this->GO_ON;
-            }
-        }
-    }
-    auto &wins = key_d.wins;
-    // create all the new windows that need to be opened by the arrival of t
-    for (long lwid = key_d.next_lwid; lwid <= last_w; lwid++) {
-        // translate the lwid into the corresponding gwid
-        uint64_t gwid = first_gwid_key + (lwid * config.n_outer * config.n_inner);
-        wins.push_back(win_t(key, lwid, gwid, Triggerer_CB(win_len, slide_len, lwid, initial_id), CB, win_len, slide_len));
-        key_d.next_lwid++;
-    }
-
+    key_d.ts_rcv_counter++;
+    key_d.slide_counter++;
     if( !isEOSMarker<tuple_t, input_t>(*wt) ) {
         key_d.received_tuples.push_back( *reinterpret_cast<result_t*>( t ) );
-        key_d.ts_rcv_counter++;
     }
+    //cout << key_d.ts_rcv_counter << endl;
 
     size_t cnt_fired = 0;
     uint64_t gwid;
@@ -930,7 +905,8 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
     return this->GO_ON;
 }
 
-    result_t *timebasedSvc( input_t *wt ) {
+    result_t *timebasedSvc( input_t *wt ) 
+    {
 #if defined (LOG_DIR)
         startTS = current_time_nsecs();
         if (rcvTuples == 0)

@@ -515,6 +515,8 @@ public:
             return this->GO_ON;
         }
 
+        key_d.ts_rcv_counter++;
+        key_d.slide_counter++;
         if (!isEOSMarker<tuple_t, input_t>(*wt)) {
             (key_d.tuples).push_back( *reinterpret_cast<result_t*>( t ) );
             key_d.ts_rcv_counter++;
@@ -585,8 +587,8 @@ public:
                 }
                 key_d.tuples.clear( );
             }
-            key_d.batchedWin = 0;
             key_d.bfat.startGettingResult();
+            key_d.batchedWin = 0;
         }
         return this->GO_ON;
     }
