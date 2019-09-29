@@ -465,6 +465,7 @@ public:
                     key_d.tuples.begin( ),
                     key_d.tuples.begin( ) + batch_len * slide_len
                 );
+                isFirstBatch = false;
             } else {
                 if( isFirstBatch ) {
                     key_d.bfat.build( key_d.tuples, key, 0, 0 );
@@ -578,6 +579,7 @@ public:
                     key_d.tuples.begin( ),
                     key_d.tuples.begin( ) + batch_len * slide_len
                 );
+                isFirstBatch = false;
             } else {
                 if( isFirstBatch ) {
                     key_d.bfat.build( key_d.tuples, key, 0, 0 );
@@ -914,11 +916,13 @@ public:
     // method to manage the EOS (utilized by the FastFlow runtime)
     void eosnotify(ssize_t id)
     {
+/*
         if( timebasedBFAT ) {
             return timebasedEosNotify( id );
         } else {
             return countbasedEosNotify( id );
         }
+*/
     }
 
     // svc_end method (utilized by the FastFlow runtime)

@@ -1133,6 +1133,7 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
     // method to manage the EOS (utilized by the FastFlow runtime)
     void eosnotify(ssize_t id)
     {
+/*
         // it checks for which implementation the object is using
         if( timebasedFAT ) {
             return timebasedEosNotify( id );
@@ -1141,6 +1142,7 @@ result_t *ManageWindow( Key_Descriptor& key_d, input_t *wt, tuple_t *t )
         } else {
             defaultEosNotifiy( id );
         }
+*/
     }
 
     // svc_end method (utilized by the FastFlow runtime)
